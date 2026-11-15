@@ -139,7 +139,7 @@ pub fn Prefs() -> impl IntoElement {
             row()
                 .child(label("唤出快捷键"))
                 .child(
-                    text("⌘⇧V")
+                    text(crate::keys::HOTKEY)
                         .text_size(px(12.0))
                         .text_color(move || theme().foreground),
                 )

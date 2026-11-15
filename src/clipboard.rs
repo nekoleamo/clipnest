@@ -9,6 +9,14 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use crate::model::{Item, ItemKind};
 
+/// 采集到的图片（PNG 编码后的字节）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImageBytes {
+    pub png: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
 /// 一次采集的结果。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Snapshot {
@@ -20,6 +28,8 @@ pub struct Snapshot {
     pub text: Option<String>,
     /// 文件 flavor 的路径。
     pub files: Vec<String>,
+    /// 图片 flavor（已编码成 PNG）。
+    pub image: Option<ImageBytes>,
 }
 
 /// 自身写回后登记的 changeCount：watcher 见到它即跳过。
@@ -39,6 +49,7 @@ pub fn is_self_write(cc: i64) -> bool {
 
 /// 读一次剪贴板；没有任何 flavor 时返回 `None`。
 pub fn capture() -> Option<Snapshot> {
+    use clipboard_rs::common::RustImage;
     use clipboard_rs::{Clipboard, ClipboardContext, ContentFormat};
 
     let ctx = ClipboardContext::new().ok()?;
@@ -46,6 +57,7 @@ pub fn capture() -> Option<Snapshot> {
     let mut excerpt = String::new();
     let mut text = None;
     let mut files = Vec::new();
+    let mut image = None;
 
     if ctx.has(ContentFormat::Files) {
         flavors.push("files");
@@ -56,6 +68,29 @@ pub fn capture() -> Option<Snapshot> {
     }
     if ctx.has(ContentFormat::Image) {
         flavors.push("image");
+        // 编码成 PNG 才能落盘与算内容哈希；解码失败就只记 flavor 不落库。
+        if let Ok(data) = ctx.get_image()
+            && let Ok(png) = data.to_png()
+        {
+            let (width, height) = data.get_size();
+            image = Some(ImageBytes {
+                png: png.get_bytes().to_vec(),
+                width,
+                height,
+            });
+            if excerpt.is_empty() {
+                excerpt = format!("<图片 {width}×{height}>");
+            }
+        }
+    }
+    // clipboard-rs 的 image 只开 png/jpeg：macOS 截图常只有 TIFF，自己兜底解一次。
+    if image.is_none() && flavors.contains(&"image") {
+        image = read_pasteboard_image();
+        if let Some(img) = &image
+            && excerpt.is_empty()
+        {
+            excerpt = format!("<图片 {}×{}>", img.width, img.height);
+        }
     }
     if ctx.has(ContentFormat::Html) {
         flavors.push("html");
@@ -94,22 +129,78 @@ pub fn capture() -> Option<Snapshot> {
         excerpt: excerpt.replace('\n', "\\n"),
         text,
         files,
+        image,
     })
+}
+
+/// macOS：直接从 `NSPasteboard` 取 PNG/TIFF 并自己解码成 PNG。
+///
+/// `clipboard-rs` 的 `image` 依赖只开 `png`/`jpeg` 解码，而系统截图常常只在
+/// 剪贴板里放 TIFF，所以这条兜底是必需的（实测 `tools/pb.swift image` 就走到这里）。
+#[cfg(target_os = "macos")]
+fn read_pasteboard_image() -> Option<ImageBytes> {
+    use objc2_app_kit::{
+        NSBitmapImageFileType, NSBitmapImageRep, NSImage, NSPasteboard,
+    };
+    use objc2::AnyThread;
+    use objc2_foundation::{NSDictionary, NSString};
+
+    let pb = NSPasteboard::generalPasteboard();
+
+    // 1) 直接有 PNG 就用（最快，也不经系统重编码）
+    let png_type = NSString::from_str("public.png");
+    if let Some(data) = pb.dataForType(&png_type) {
+        let bytes = data.to_vec();
+        if let Ok(img) = image::load_from_memory(&bytes) {
+            let (width, height) = (img.width(), img.height());
+            return Some(ImageBytes {
+                png: bytes,
+                width,
+                height,
+            });
+        }
+    }
+
+    // 2) 只有 TIFF（macOS 截图的常态）：让系统解成位图再编码成 PNG，
+    //    避免依赖 image crate 的 TIFF 解码器（实测它解不了 NSImage 出的 TIFF）。
+    let image = NSImage::initWithPasteboard(NSImage::alloc(), &pb)?;
+    let tiff = image.TIFFRepresentation()?;
+    let rep = NSBitmapImageRep::initWithData(NSBitmapImageRep::alloc(), &tiff)?;
+    let empty = NSDictionary::new();
+    // SAFETY: 属性字典为空是文档允许的用法。
+    let data = unsafe { rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &empty) }?;
+    let png = data.to_vec();
+    let img = image::load_from_memory(&png).ok()?;
+    let (width, height) = (img.width(), img.height());
+    Some(ImageBytes { png, width, height })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_pasteboard_image() -> Option<ImageBytes> {
+    None
 }
 
 /// 把一条历史写回剪贴板，并登记回环抑制。返回写回后的 changeCount。
 pub fn write_back(item: &Item) -> Result<i64, String> {
     use clipboard_rs::{Clipboard, ClipboardContext};
 
-    if item.kind == ItemKind::Image {
-        return Err("图片条目粘贴要等 P3 的资源管线".to_owned());
-    }
     let ctx = ClipboardContext::new().map_err(|e| format!("剪贴板不可用：{e}"))?;
     match item.kind {
         ItemKind::Text => ctx.set_text(item.content.clone()),
         ItemKind::Html => ctx.set_html(item.content.clone()),
         ItemKind::Rtf => ctx.set_rich_text(item.content.clone()),
-        ItemKind::Image => unreachable!("图片在建剪贴板上下文前就被拒绝"),
+        ItemKind::Image => {
+            use clipboard_rs::common::{RustImage, RustImageData};
+            // `content` 存的是 `<hash>.png`，文件在 images/origin/<hh>/ 下。
+            let hash = item.content.strip_suffix(".png").unwrap_or(&item.content);
+            let path = crate::paths().image_origin(hash);
+            if !path.exists() {
+                return Err(format!("图片文件不见了：{}", path.display()));
+            }
+            let path = path.to_str().ok_or("图片路径不是 UTF-8")?;
+            let data = RustImageData::from_path(path).map_err(|e| format!("读图片失败：{e}"))?;
+            ctx.set_image(data)
+        }
         ItemKind::Files => ctx.set_files(
             item.content
                 .lines()
@@ -431,9 +522,10 @@ mod tests {
         }
     }
 
+    /// 图片条目粘贴要读 `images/origin/<hh>/<hash>.png`；文件没了要给清楚的错，而不是 panic。
     #[test]
-    fn image_items_refuse_to_paste_yet() {
-        let err = write_back(&item(ItemKind::Image, "abc.png")).unwrap_err();
-        assert!(err.contains("P3"), "{err}");
+    fn image_without_file_reports_missing() {
+        let err = write_back(&item(ItemKind::Image, "abcdef.png")).unwrap_err();
+        assert!(err.contains("图片文件不见了"), "{err}");
     }
 }

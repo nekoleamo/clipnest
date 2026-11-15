@@ -60,6 +60,12 @@ nsh package --target windows
 24. 响应式列表用 `each(rows, |r| r.id, …)`：静态 `children` 不刷新，`dynamic` 整块重建会把搜索框焦点搞丢。行渲染函数返回具体 `View`（`impl IntoElement` 会带出 `&Row` 生命周期，E0515）。
 25. 面板激活自己会抢走前台：粘贴流程 = 写回 → `dismiss()`（隐藏 + `NSRunningApplication::activate` 原应用）→ 120 ms → ⌘V；原应用 pid 在打开前用 `NSWorkspace.frontmostApplication()` 记。
 
+## 图片（P3 实测）
+
+1. **`clipboard-rs` 的 `image` 只开 `png`/`jpeg` 解码**：macOS 截图常只给 TIFF，`get_image()` 会失败。兜底走 AppKit 重编码（`NSImage → NSBitmapImageRep → representationUsingType(PNG)`），别指望 `image` crate 解 NSImage 出的 TIFF。
+2. 图片文件名 = `blake3(png 字节)`：内容哈希即文件名，去重与分片（`<hash前2>/`）都靠它。
+3. 图片优先于文本：复制截图时系统同时给文本/位图 flavor，`store::record` 只留图片条目。
+
 ## 代码检索
 
 本仓库已有 `.codegraph/` 索引（codegraph 1.6.2）。改代码前优先走 codegraph MCP（`codegraph_explore`，传 `projectPath=/Users/nekoleamo/Documents/Working/clipnest`），不要逐个 grep/read。改动较大后重建：`codegraph init`（增量）或 `codegraph status` 查是否过期。

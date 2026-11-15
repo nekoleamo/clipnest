@@ -29,6 +29,8 @@ pub struct Row {
     pub summary: String,
     /// 相对时间。
     pub time: String,
+    /// 图片条目的缩略图路径（渲染用；文件不在就给 None）。
+    pub thumb: Option<String>,
     pub pinned: bool,
     pub favorite: bool,
 }
@@ -41,6 +43,7 @@ impl Row {
             tag: tag_of(item.kind).to_owned(),
             summary: summary_of(item),
             time: relative_time(&item.updated_at),
+            thumb: thumbnail_of(item),
             pinned: item.pinned,
             favorite: item.favorite,
         }
@@ -80,6 +83,16 @@ pub fn summary_of(item: &Item) -> String {
         },
         _ => item.excerpt(120),
     }
+}
+
+/// 图片条目的缩略图路径（`<hash>.png` → `images/thumbnails/<hh>/<hash>.png`）。
+fn thumbnail_of(item: &Item) -> Option<String> {
+    if item.kind != ItemKind::Image {
+        return None;
+    }
+    let hash = item.content.strip_suffix(".png").unwrap_or(&item.content);
+    let path = crate::paths().image_thumbnail(hash);
+    path.exists().then(|| path.display().to_string())
 }
 
 /// 查一次库，返回渲染用的行。
@@ -455,13 +468,13 @@ pub fn Panel() -> impl IntoElement {
             text(move || {
                 let n = rows.with(Vec::len);
                 if n == 0 {
-                    "↑↓ 选择 · ⏎ 粘贴 · ⌘1-9 直贴 · ⌘D 删除 · ⌘P 置顶 · ⌘S 收藏 · ⌘Y 复制"
-                        .to_owned()
+                    crate::keys::HINTS.to_owned()
                 } else {
                     format!(
-                        "{}/{} · ↑↓ 选择 · ⏎ 粘贴 · ⌘1-9 直贴 · ⌘D 删除 · ⌘P 置顶 · ⌘S 收藏 · ⌘Y 复制",
+                        "{}/{} · {}",
                         sel.get().min(n - 1) + 1,
-                        n
+                        n,
+                        crate::keys::HINTS
                     )
                 }
             })
@@ -478,6 +491,7 @@ fn row_view(row: &Row, index: usize, sel: Signal<usize>) -> View {
     let time = row.time.clone();
     let pinned = row.pinned;
     let favorite = row.favorite;
+    let thumb = row.thumb.clone();
     let sel_press = sel;
     let sel_bg = sel;
     view()
@@ -495,9 +509,10 @@ fn row_view(row: &Row, index: usize, sel: Signal<usize>) -> View {
             }
         })
         .on_press(move |_: &()| sel_press.set(index))
+        .child(thumb_chip(thumb))
         .child(
             text(if index < 9 {
-                format!("⌘{}", index + 1)
+                crate::keys::slot(index)
             } else {
                 String::new()
             })
@@ -527,6 +542,19 @@ fn row_view(row: &Row, index: usize, sel: Signal<usize>) -> View {
                 ),
         )
         .child(view().opacity(0.0).child(text(format!("{id}"))))
+}
+
+/// 图片条目的缩略图（28pt 方形，没有就占位不画）。
+fn thumb_chip(path: Option<String>) -> View {
+    match path {
+        Some(p) => view().w(px(28.0)).h(px(28.0)).rounded_sm().child(
+            image(p)
+                .w(px(28.0))
+                .h(px(28.0))
+                .rounded_sm(),
+        ),
+        None => view().w(px(0.0)),
+    }
 }
 
 /// 列表为空时的一句提示。

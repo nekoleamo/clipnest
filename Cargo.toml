@@ -21,6 +21,7 @@ uuid = { version = "1.29.2", features = ["v4"] }
 chacha20poly1305 = "0.11.0"
 argon2 = "0.6.0"
 getrandom = "0.4.3"
+image = { version = "0.25.10", default-features = false, features = ["png", "tiff"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 nsh-platform-macos = { version = "0.5.1", default-features = false }

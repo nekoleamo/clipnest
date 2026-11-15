@@ -22,6 +22,7 @@ use nsh_core::prelude::*;
 pub mod backup;
 pub mod clipboard;
 pub mod db;
+pub mod keys;
 pub mod logs;
 pub mod model;
 pub mod panel;
@@ -346,6 +347,7 @@ fn store_capture(snap: &clipboard::Snapshot) {
     let captured = store::Captured {
         text: snap.text.clone(),
         files: snap.files.clone(),
+        image: snap.image.clone(),
     };
     if captured.is_empty() {
         logs::line("DB SKIP 无可入库内容");

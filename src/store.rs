@@ -11,6 +11,7 @@ use rusqlite::Connection;
 
 use crate::db;
 use crate::db::items::{self, UpsertResult};
+use crate::clipboard::ImageBytes;
 use crate::model::{ItemKind, NewItem};
 use crate::paths::Paths;
 
@@ -21,11 +22,13 @@ pub struct Captured {
     pub text: Option<String>,
     /// 文件 flavor 的路径列表。
     pub files: Vec<String>,
+    /// 图片 flavor（PNG 字节 + 尺寸）。
+    pub image: Option<ImageBytes>,
 }
 
 impl Captured {
     pub fn is_empty(&self) -> bool {
-        self.text.is_none() && self.files.is_empty()
+        self.text.is_none() && self.files.is_empty() && self.image.is_none()
     }
 
     /// 翻译成要入库的条目。
@@ -70,8 +73,29 @@ impl Stored {
 }
 
 /// 把快照写库；返回每条的结果。
+///
+/// 图片优先：复制截图时系统同时给文本/位图 flavor，只留图片条目。
 pub fn record(conn: &Connection, cap: &Captured) -> rusqlite::Result<Vec<Stored>> {
+    record_at(crate::paths(), conn, cap)
+}
+
+/// [`record`] 指定数据根（测试用临时目录）。
+pub fn record_at(
+    paths: &Paths,
+    conn: &Connection,
+    cap: &Captured,
+) -> rusqlite::Result<Vec<Stored>> {
     let mut out = Vec::new();
+    if let Some(image) = &cap.image
+        && let Ok(item) = save_image(paths, image)
+    {
+        let result = items::upsert(conn, &item)?;
+        out.push(Stored {
+            kind: item.kind,
+            result,
+        });
+        return Ok(out);
+    }
     for item in cap.to_new_items() {
         let result = items::upsert(conn, &item)?;
         out.push(Stored {
@@ -80,6 +104,42 @@ pub fn record(conn: &Connection, cap: &Captured) -> rusqlite::Result<Vec<Stored>
         });
     }
     Ok(out)
+}
+
+/// 缩略图最长边（面板里显示用）。
+pub const THUMBNAIL_MAX: u32 = 320;
+
+/// 把图片写进 `images/origin` 与 `images/thumbnails`，返回要入库的条目。
+///
+/// 文件名就是图片内容的 blake3：同一张图再复制一次不会产生新文件。
+fn save_image(paths: &Paths, image: &ImageBytes) -> std::io::Result<NewItem> {
+    let hash = blake3::hash(&image.png).to_hex().to_string();
+    let name = crate::paths::image_name(&hash);
+    let (origin, thumb) = paths.ensure_image_dirs(&hash)?;
+
+    if !origin.exists() {
+        std::fs::write(&origin, &image.png)?;
+    }
+    if !thumb.exists()
+        && let Err(e) = write_thumbnail(&image.png, &thumb)
+    {
+        // 缩略图失败不影响原图与入库（面板退化成显示尺寸）。
+        crate::logs::line(format!("THUMB ERROR {e}"));
+    }
+    Ok(NewItem::image(
+        name,
+        i64::from(image.width),
+        i64::from(image.height),
+    ))
+}
+
+/// 生成缩略图（等比缩到 [`THUMBNAIL_MAX`] 以内）。
+fn write_thumbnail(png: &[u8], to: &std::path::Path) -> std::io::Result<()> {
+    let img = image::load_from_memory(png).map_err(std::io::Error::other)?;
+    let small = img.thumbnail(THUMBNAIL_MAX, THUMBNAIL_MAX);
+    small
+        .save_with_format(to, image::ImageFormat::Png)
+        .map_err(std::io::Error::other)
 }
 
 static DB: OnceLock<Mutex<Connection>> = OnceLock::new();
@@ -180,6 +240,7 @@ mod tests {
             &Captured {
                 text: Some(String::new()),
                 files: vec![],
+                image: None,
             }
         )
         .unwrap()
@@ -199,6 +260,7 @@ mod tests {
             // 复制文件时系统还会给一段路径文本，不该额外入库
             text: Some(format!("{}", file.display())),
             files: vec![dir.display().to_string(), file.display().to_string()],
+            image: None,
         };
         let stored = record(&conn, &cap).unwrap();
         assert_eq!(stored.len(), 1);
@@ -254,6 +316,80 @@ mod tests {
         assert_eq!(prune(&conn, 0).unwrap(), 0);
         assert_eq!(prune(&conn, 1).unwrap(), 2, "名额被受保护条目占满时只删其余的");
         assert_eq!(items::count(&conn).unwrap(), 2);
+    }
+
+    /// 造一张纯色 PNG，够测落盘与缩略图。
+    fn png_of(w: u32, h: u32, rgba: [u8; 4]) -> Vec<u8> {
+        let img = image::RgbaImage::from_pixel(w, h, image::Rgba(rgba));
+        let mut out = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+            .unwrap();
+        out
+    }
+
+    #[test]
+    fn image_is_saved_with_thumbnail_and_deduped() {
+        let root = std::env::temp_dir().join(format!("clipnest-store-img-{}", crate::model::now()));
+        let paths = Paths::from_root(&root);
+        let conn = db::open_memory().unwrap();
+
+        let png = png_of(640, 480, [255, 0, 0, 255]);
+        let cap = Captured {
+            image: Some(ImageBytes {
+                png: png.clone(),
+                width: 640,
+                height: 480,
+            }),
+            // 复制截图时系统也给文本 flavor，图片优先
+            text: Some("不该入库的文本".to_owned()),
+            ..Default::default()
+        };
+
+        let stored = record_at(&paths, &conn, &cap).unwrap();
+        assert_eq!(stored.len(), 1, "图片优先，不再落文本");
+        assert_eq!(stored[0].kind, ItemKind::Image);
+
+        let item = items::get(&conn, stored[0].result.id()).unwrap().unwrap();
+        assert_eq!(item.width, Some(640));
+        assert_eq!(item.height, Some(480));
+        let hash = item.content.strip_suffix(".png").unwrap();
+        assert_eq!(hash.len(), 64, "文件名就是图片内容的 blake3");
+
+        let origin = paths.image_origin(hash);
+        let thumb = paths.image_thumbnail(hash);
+        assert!(origin.exists(), "原图要落盘");
+        assert_eq!(std::fs::read(&origin).unwrap(), png, "原图字节不变");
+        let t = image::open(&thumb).unwrap();
+        assert!(t.width().max(t.height()) <= THUMBNAIL_MAX, "缩略图要缩小");
+        assert!(t.width() > 1, "缩略图不能缩成一条线");
+
+        // 同一张图再复制：只涨 use_count，不新增行、不重写文件
+        let again = record_at(&paths, &conn, &cap).unwrap();
+        assert!(matches!(again[0].result, UpsertResult::Deduped(_)));
+        assert_eq!(items::count(&conn).unwrap(), 1);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn broken_image_bytes_do_not_panic() {
+        let root = std::env::temp_dir().join(format!("clipnest-store-bad-{}", crate::model::now()));
+        let paths = Paths::from_root(&root);
+        let conn = db::open_memory().unwrap();
+        let cap = Captured {
+            image: Some(ImageBytes {
+                png: b"not a png".to_vec(),
+                width: 10,
+                height: 10,
+            }),
+            text: Some("回退到文本".to_owned()),
+            ..Default::default()
+        };
+        // 原图能落盘（字节不校验），缩略图失败只记日志；条目仍然入库
+        let stored = record_at(&paths, &conn, &cap).unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].kind, ItemKind::Image);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
