@@ -16,6 +16,8 @@ use std::time::Duration;
 pub mod backup;
 pub mod db;
 pub mod model;
+pub mod paths;
+pub mod store;
 
 use nsh_base::theme;
 use nsh_core::desktop::{WindowAttributes, WindowKind};
@@ -193,18 +195,33 @@ fn change_count() -> i64 {
     0
 }
 
-/// 读一次剪贴板，返回 (flavors, 摘要)。
-fn capture_once() -> Option<(String, String)> {
+/// 一次采集的结果。
+struct Snapshot {
+    /// flavor 名单，如 `text+html`。
+    flavors: String,
+    /// 摘要（日志与面板用，已压平换行）。
+    excerpt: String,
+    /// 要入库的纯文本。
+    text: Option<String>,
+    /// 要入库的文件路径。
+    files: Vec<String>,
+}
+
+/// 读一次剪贴板。
+fn capture_once() -> Option<Snapshot> {
     use clipboard_rs::{Clipboard, ClipboardContext, ContentFormat};
 
     let ctx = ClipboardContext::new().ok()?;
     let mut flavors: Vec<&str> = Vec::new();
     let mut excerpt = String::new();
+    let mut text = None;
+    let mut files = Vec::new();
 
     if ctx.has(ContentFormat::Files) {
         flavors.push("files");
-        if let Ok(files) = ctx.get_files() {
-            excerpt = files.join("|");
+        if let Ok(list) = ctx.get_files() {
+            excerpt = list.join("|");
+            files = list;
         }
     }
     if ctx.has(ContentFormat::Image) {
@@ -212,21 +229,28 @@ fn capture_once() -> Option<(String, String)> {
     }
     if ctx.has(ContentFormat::Html) {
         flavors.push("html");
-        if let Ok(html) = ctx.get_html() {
+        if excerpt.is_empty()
+            && let Ok(html) = ctx.get_html()
+        {
             excerpt = html;
         }
     }
     if ctx.has(ContentFormat::Rtf) {
         flavors.push("rtf");
-        if let Ok(rtf) = ctx.get_rich_text() {
+        if excerpt.is_empty()
+            && let Ok(rtf) = ctx.get_rich_text()
+        {
             excerpt = rtf;
         }
     }
     if ctx.has(ContentFormat::Text) {
         flavors.push("text");
-        if excerpt.is_empty() {
-            if let Ok(text) = ctx.get_text() {
-                excerpt = text;
+        if let Ok(t) = ctx.get_text() {
+            if excerpt.is_empty() {
+                excerpt = t.clone();
+            }
+            if !t.is_empty() {
+                text = Some(t);
             }
         }
     }
@@ -235,7 +259,40 @@ fn capture_once() -> Option<(String, String)> {
         return None;
     }
     let excerpt: String = excerpt.chars().take(60).collect();
-    Some((flavors.join("+"), excerpt.replace('\n', "\\n")))
+    Some(Snapshot {
+        flavors: flavors.join("+"),
+        excerpt: excerpt.replace('\n', "\\n"),
+        text,
+        files,
+    })
+}
+
+/// 把一次采集落库；结果写日志（`DB INSERTED/DEDUPED id=…`）。
+fn store_capture(snap: &Snapshot) {
+    let captured = store::Captured {
+        text: snap.text.clone(),
+        files: snap.files.clone(),
+    };
+    if captured.is_empty() {
+        log_line("DB SKIP 无可入库内容".to_owned());
+        return;
+    }
+    let Some(db) = store::db() else {
+        log_line("DB UNAVAILABLE 跳过入库".to_owned());
+        return;
+    };
+    let Ok(conn) = db.lock() else {
+        log_line("DB LOCK ERROR 跳过入库".to_owned());
+        return;
+    };
+    match store::record(&conn, &captured) {
+        Ok(stored) => {
+            for s in stored {
+                log_line(format!("DB {} kind={}", s.label(), s.kind.as_str()));
+            }
+        }
+        Err(e) => log_line(format!("DB ERROR {e}")),
+    }
 }
 
 /// 发送 ⌘V（用 core-graphics 的 CGEvent，进程内实现）。
@@ -288,8 +345,13 @@ fn start_watcher() {
             }
 
             match capture_once() {
-                Some((flavors, excerpt)) => {
-                    log_line(format!("CAPTURE cc={now} flavors={flavors} :: {excerpt}"));
+                Some(snap) => {
+                    log_line(format!(
+                        "CAPTURE cc={now} flavors={} :: {}",
+                        snap.flavors, snap.excerpt
+                    ));
+                    store_capture(&snap);
+                    let excerpt = snap.excerpt.clone();
                     if std::env::var("SPIKE_WRITEBACK").is_ok() {
                         use clipboard_rs::{Clipboard, ClipboardContext};
                         if let Ok(ctx) = ClipboardContext::new() {
@@ -317,10 +379,12 @@ pub fn boot() {
     static ONCE: OnceLock<()> = OnceLock::new();
     ONCE.get_or_init(|| {
         log_line(format!(
-            "BOOT pid={} front={} axTrusted={}",
+            "BOOT pid={} front={} axTrusted={} db={} items={:?}",
             std::process::id(),
             frontmost(),
-            ax_trusted()
+            ax_trusted(),
+            store::db_path().display(),
+            store::count()
         ));
         start_watcher();
     });
