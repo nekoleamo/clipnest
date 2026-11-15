@@ -225,11 +225,55 @@ pub fn Prefs() -> impl IntoElement {
         )
         .child(
             row()
+                .child(label("面板位置"))
+                .child({
+                    let pos_now = current;
+                    let note_pos = note;
+                    view()
+                        .px_3()
+                        .py_1()
+                        .rounded_md()
+                        .bg(move || theme().secondary)
+                        .on_press(move |_: &()| {
+                            let next = if pos_now.with(|s| s.panel_position == "bottom") {
+                                "center"
+                            } else {
+                                "bottom"
+                            };
+                            let saved = apply(
+                                pos_now,
+                                Settings {
+                                    panel_position: next.to_owned(),
+                                    ..pos_now.get()
+                                },
+                            );
+                            note_pos.set(if saved.panel_position == "bottom" {
+                                "面板贴屏幕底部（下次启动生效）".to_owned()
+                            } else {
+                                "面板居中（下次启动生效）".to_owned()
+                            });
+                        })
+                        .child(
+                            text(move || {
+                                if pos_now.with(|s| s.panel_position == "bottom") {
+                                    "底部（点我改居中）"
+                                } else {
+                                    "居中（点我改底部）"
+                                }
+                            })
+                            .text_size(px(11.0))
+                            .text_color(move || theme().secondary_foreground),
+                        )
+                })
+                .child(hint("底部更靠近输入位置（按主屏算）；改完下次启动生效")),
+        )
+        .child(
+            row()
                 .child(label("数据目录"))
                 .child(
                     text(dir)
                         .text_size(px(10.0))
-                        .text_color(move || theme().muted_foreground),
+                        .text_color(move || theme().foreground),
                 )
                 .child(reveal),
         )
@@ -267,7 +311,7 @@ pub fn Prefs() -> impl IntoElement {
                 .child(
                     text(move || upd_status.get())
                         .text_size(px(10.0))
-                        .text_color(move || theme().muted_foreground),
+                        .text_color(move || theme().foreground),
                 ),
         )
         .child(sync_section())
@@ -277,7 +321,7 @@ pub fn Prefs() -> impl IntoElement {
                 .child(
                     text(move || note.get())
                         .text_size(px(10.0))
-                        .text_color(move || theme().muted_foreground),
+                        .text_color(move || theme().foreground),
                 ),
         )
 }
@@ -313,23 +357,23 @@ fn label(t: &'static str) -> View {
     view().w(px(110.0)).child(
         text(t)
             .text_size(px(11.0))
-            .text_color(move || theme().muted_foreground),
+            .text_color(move || theme().foreground),
     )
 }
 
 fn hint(t: &'static str) -> View {
     view().child(
         text(t)
-            .text_size(px(9.0))
-            .text_color(move || theme().muted_foreground),
+            .text_size(px(10.0))
+            .text_color(move || theme().foreground),
     )
 }
 
 fn hint_dyn(t: String) -> View {
     view().child(
         text(t)
-            .text_size(px(9.0))
-            .text_color(move || theme().muted_foreground),
+            .text_size(px(10.0))
+            .text_color(move || theme().foreground),
     )
 }
 
@@ -599,7 +643,7 @@ fn sync_section() -> View {
                 .child(
                     text(move || note.get())
                         .text_size(px(10.0))
-                        .text_color(move || theme().muted_foreground),
+                        .text_color(move || theme().foreground),
                 ),
         )
         .child(hint_dyn(
@@ -724,7 +768,7 @@ fn backup_section() -> View {
                 .child(
                     text(move || note.get())
                         .text_size(px(10.0))
-                        .text_color(move || theme().muted_foreground),
+                        .text_color(move || theme().foreground),
                 ),
         )
 }

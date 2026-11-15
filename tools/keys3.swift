@@ -71,6 +71,8 @@ let (code, flags): (CGKeyCode, CGEventFlags) = {
     case "x": return (7, [])           // kVK_ANSI_X
     case "down": return (125, [])      // kVK_DownArrow
     case "up": return (126, [])        // kVK_UpArrow
+    case "left": return (123, [])      // kVK_LeftArrow
+    case "right": return (124, [])     // kVK_RightArrow
     case "enter": return (36, [])      // kVK_Return
     case "escape": return (53, [])     // kVK_Escape
     case "backspace": return (51, [])  // kVK_Delete

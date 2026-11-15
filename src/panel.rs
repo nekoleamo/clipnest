@@ -29,8 +29,13 @@ pub struct Row {
     pub summary: String,
     /// 相对时间。
     pub time: String,
-    /// 图片条目的缩略图路径（渲染用；文件不在就给 None）。
+    /// 图片条目的缩略图路径（列表行用；文件不在就给 None）。
     pub thumb: Option<String>,
+    /// 图片条目的原图路径（大图预览用）。
+    pub origin: Option<String>,
+    /// 图片像素尺寸（预览按比例缩放，不裁切）。
+    pub width: Option<i64>,
+    pub height: Option<i64>,
     pub pinned: bool,
     pub favorite: bool,
     /// 被标记为敏感（密码之类）：行上显示 🔒，但仍可粘贴。
@@ -46,6 +51,9 @@ impl Row {
             summary: summary_of(item),
             time: relative_time(&item.updated_at),
             thumb: thumbnail_of(item),
+            origin: origin_of(item),
+            width: item.width,
+            height: item.height,
             pinned: item.pinned,
             favorite: item.favorite,
             sensitive: item.sensitive,
@@ -95,6 +103,16 @@ fn thumbnail_of(item: &Item) -> Option<String> {
     }
     let hash = item.content.strip_suffix(".png").unwrap_or(&item.content);
     let path = crate::paths().image_thumbnail(hash);
+    path.exists().then(|| path.display().to_string())
+}
+
+/// 图片条目的原图路径（预览用原图，比缩略图清楚）。
+fn origin_of(item: &Item) -> Option<String> {
+    if item.kind != ItemKind::Image {
+        return None;
+    }
+    let hash = item.content.strip_suffix(".png").unwrap_or(&item.content);
+    let path = crate::paths().image_origin(hash);
     path.exists().then(|| path.display().to_string())
 }
 
@@ -324,6 +342,8 @@ pub fn Panel() -> impl IntoElement {
     let q = signal(String::new());
     let rows = signal(Vec::<Row>::new());
     let sel = signal(0usize);
+    // 预览区直接读这两个 signal（dynamic 会在它们变化时重建）
+    let (rows_pv, sel_pv) = (rows, sel);
     let list: nsh_core::element::ElementRef = element_ref();
 
     // 首次显示时从库里取一次（之后由搜索/粘贴触发）。
@@ -399,6 +419,29 @@ pub fn Panel() -> impl IntoElement {
         on_key_with("escape", arrows, |_| {
             logs::line("ESC dismiss");
             crate::dismiss();
+        });
+
+        // ←/→ 也能移动选中（浏览大图时左右更顺手），与 ↑↓ 同义
+        let (rows_r, sel_r) = (rows, sel);
+        let list_r = list;
+        on_key_with("right", arrows, move |_| {
+            let n = rows_r.with(Vec::len);
+            if n == 0 {
+                return;
+            }
+            let next = (sel_r.get() + 1).min(n - 1);
+            sel_r.set(next);
+            list_r.scroll_to_index(next as u32, percentage(50.0), px(0.0), false);
+        });
+        let (rows_l, sel_l) = (rows, sel);
+        let list_l = list;
+        on_key_with("left", arrows, move |_| {
+            if rows_l.with(Vec::len) == 0 {
+                return;
+            }
+            let prev = sel_l.get().saturating_sub(1);
+            sel_l.set(prev);
+            list_l.scroll_to_index(prev as u32, percentage(50.0), px(0.0), false);
         });
 
         // ⌘1-9：直接粘贴第 N 条（不用先移动选中）
@@ -524,6 +567,7 @@ pub fn Panel() -> impl IntoElement {
         .bg(move || theme().background)
         .child(ax_banner())
         .child(field)
+        .child(dynamic(move || preview(rows_pv, sel_pv)))
         .child(
             scroll()
                 .element_ref(&list)
@@ -573,8 +617,8 @@ pub fn Panel() -> impl IntoElement {
                     )
                 }
             })
-            .text_size(px(10.0))
-            .text_color(move || theme().muted_foreground),
+            .text_size(px(9.0))
+            .text_color(move || theme().foreground),
         )
 }
 
@@ -613,12 +657,12 @@ fn row_view(row: &Row, index: usize, sel: Signal<usize>) -> View {
                 String::new()
             })
             .text_size(px(9.0))
-            .text_color(move || theme().muted_foreground),
+            .text_color(move || theme().foreground),
         )
         .child(
             text(tag.to_string())
                 .text_size(px(10.0))
-                .text_color(move || theme().muted_foreground),
+                .text_color(move || theme().foreground),
         )
         .child(
             view()
@@ -638,7 +682,7 @@ fn row_view(row: &Row, index: usize, sel: Signal<usize>) -> View {
                 .child(
                     text(format!("{}{time}", if favorite { "★ " } else { "" }))
                         .text_size(px(9.0))
-                        .text_color(move || theme().muted_foreground),
+                        .text_color(move || theme().foreground),
                 ),
         )
         .child(view().opacity(0.0).child(text(format!("{id}"))))
@@ -683,14 +727,36 @@ fn ax_banner() -> View {
         )
 }
 
-/// 图片条目的缩略图（28pt 方形，没有就占位不画）。
+/// 选中图片时的大图预览（占列表上方一块，等比缩放不裁切）。
+fn preview(rows: Signal<Vec<Row>>, sel: Signal<usize>) -> AnyElement {
+    let path = rows.with(|r| r.get(sel.get()).and_then(|row| row.origin.clone()));
+    match path {
+        Some(path) => view()
+            .w_full()
+            .h(px(240.0))
+            .rounded_md()
+            .bg(move || theme().muted)
+            .child(
+                image(path)
+                    .w_full()
+                    .h(px(240.0))
+                    .object_fit(nsh_core::ResizeMode::Contain)
+                    .rounded_md(),
+            )
+            .into_element(),
+        None => view().h(px(0.0)).into_element(),
+    }
+}
+
+/// 图片条目的缩略图（40pt 方形，没有就占位不画）。
 fn thumb_chip(path: Option<String>) -> View {
     match path {
-        Some(p) => view().w(px(28.0)).h(px(28.0)).rounded_sm().child(
+        Some(p) => view().w(px(40.0)).h(px(40.0)).rounded_sm().child(
             image(p)
-                .w(px(28.0))
-                .h(px(28.0))
-                .rounded_sm(),
+                .w(px(40.0))
+                .h(px(40.0))
+                .rounded_sm()
+                .object_fit(nsh_core::ResizeMode::Contain),
         ),
         None => view().w(px(0.0)),
     }
@@ -707,7 +773,7 @@ fn empty_hint(rows: Signal<Vec<Row>>) -> impl IntoElement {
             }
         })
         .text_size(px(11.0))
-        .text_color(move || theme().muted_foreground),
+        .text_color(move || theme().foreground),
     )
 }
 

@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use nsh_core::desktop::{WindowAttributes, WindowFrame, WindowKind};
+use nsh_core::desktop::{WindowAttributes, WindowFrame, WindowKind, WindowPosition};
 use nsh_core::element::desktop::{WindowRef, current_window, register_global_shortcut, window};
 use nsh_core::prelude::*;
 
@@ -60,6 +60,9 @@ static TRAY_ATTACHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 static SYNC_CONFIG: OnceLock<std::sync::Mutex<sync::config::SyncConfig>> = OnceLock::new();
 /// 最近一次同步的结果（UI 每隔几百毫秒读一次）。
 static SYNC_STATUS: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// 面板首次出现的位置（启动时算一次：nsh 的位置只在窗口创建时生效）。
+static PANEL_AT: OnceLock<Option<(f32, f32)>> = OnceLock::new();
 
 static PATHS: OnceLock<paths::Paths> = OnceLock::new();
 static SETTINGS: OnceLock<std::sync::Mutex<settings::Settings>> = OnceLock::new();
@@ -359,6 +362,11 @@ pub fn App() -> impl IntoElement {
             .id("panel")
             .kind(WindowKind::Popup)
             .default_size(size(px(settings::PANEL_WIDTH as f32), px(panel_height)))
+            // 位置只在窗口创建时生效（运行中 set_bounds 对 Popup 无效，实测）。
+            .default_position(match PANEL_AT.get().copied().flatten() {
+                Some((x, y)) => WindowPosition::At(point(px(x), px(y))),
+                None => WindowPosition::Center,
+            })
             .attributes({
                 let mut attrs = WindowAttributes::for_kind(WindowKind::Popup);
                 // 激活自己：不激活的话 app 不 active，窗口永远成不了 key window，
@@ -431,11 +439,17 @@ fn focus_when_ready(attempt: u32) {
             // 别的线程跑（实测 `MainThreadMarker::new()` 为 None），从非主线程
             // 调 AppKit 的 makeKeyAndOrderFront 是空操作——面板收不到键盘。
             let answer = run_on_main_thread(move || {
-                // 多屏：先摆到鼠标所在那块屏的中央，再抢 key。
+                // 多屏 + 位置：摆到鼠标所在那块屏（居中或贴底），再抢 key。
                 let size = settings();
-                let at = cursor::panel_origin(settings::PANEL_WIDTH as f32, size.panel_height as f32);
+                let at = cursor::panel_origin(
+                    settings::PANEL_WIDTH as f32,
+                    size.panel_height as f32,
+                    cursor::position_of(&size.panel_position),
+                );
                 PANEL.with(|slot| {
                     if let Some(panel) = slot.borrow().as_ref() {
+                        // 先 focus：窗口没显示时 set_bounds 会被平台忽略（实测窗口仍停在默认居中位）。
+                        panel.focus();
                         if let Some((x, y)) = at {
                             panel.set_bounds(WindowFrame {
                                 x: Some(px(x)),
@@ -443,7 +457,6 @@ fn focus_when_ready(attempt: u32) {
                                 ..Default::default()
                             });
                         }
-                        panel.focus();
                     }
                 });
                 logs::line(format!("PANEL at={at:?}"));
@@ -616,6 +629,16 @@ pub fn boot() {
                 start_sync();
             });
         }
+
+        // 面板位置：只在窗口创建时用得上，启动时算一次（主线程，能碰 AppKit）。
+        let s = settings();
+        let at = cursor::panel_origin(
+            settings::PANEL_WIDTH as f32,
+            s.panel_height as f32,
+            cursor::position_of(&s.panel_position),
+        );
+        let _ = PANEL_AT.set(at);
+        logs::line(format!("PANEL at={at:?} position={}", s.panel_position));
 
         start_watcher();
 

@@ -8,33 +8,51 @@
 //! 坐标约定：nsh 的屏幕坐标是**左上原点、y 向下**；
 //! macOS 的 `NSScreen.frame` 是左下原点、y 向上，需要按主屏高度翻转。
 
-/// 面板在鼠标所在屏幕上的居中位置（左上角，nsh 坐标）。拿不到就返回 `None`。
+/// 面板放在屏幕的哪个位置。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Position {
+    /// 屏幕正中。
+    Center,
+    /// 贴屏幕底部（距底 24pt，留出 Dock/输入法条的空间）。
+    Bottom,
+}
+
+/// 从设置里的字符串来。
+pub fn position_of(text: &str) -> Position {
+    if text == "center" {
+        Position::Center
+    } else {
+        Position::Bottom
+    }
+}
+
+/// 面板在主屏上的位置（左上角，nsh 坐标）。拿不到就返回 `None`。
+///
+/// **只在窗口创建时用得上**：nsh 的 `WindowRef::set_bounds` 对 `WindowKind::Popup`
+/// 不生效（实测窗口纹丝不动），所以位置由 `window().default_position(..)` 在创建时给。
+///
+/// 这里刻意只用 CoreGraphics（`CGDisplay::main().bounds()`）：`NSScreen`/`NSEvent`
+/// 要求主线程，而打包后的 runner 里 `boot()` 不在主线程（实测 `at=None`）。
+/// 代价是不跟随鼠标所在屏——多屏时面板总在主屏（nsh 也拿不到可靠的鼠标位置）。
 #[cfg(target_os = "macos")]
-pub fn panel_origin(width: f32, height: f32) -> Option<(f32, f32)> {
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::{NSEvent, NSScreen};
+pub fn panel_origin(width: f32, height: f32, position: Position) -> Option<(f32, f32)> {
+    use core_graphics::display::CGDisplay;
 
-    let mtm = MainThreadMarker::new()?;
-    let main = NSScreen::mainScreen(mtm)?;
-    let main_height = main.frame().size.height;
-    let mouse = NSEvent::mouseLocation();
-
-    let screens = NSScreen::screens(mtm);
-    let target = screens
-        .iter()
-        .find(|s| {
-            let f = s.frame();
-            mouse.x >= f.origin.x
-                && mouse.x < f.origin.x + f.size.width
-                && mouse.y >= f.origin.y
-                && mouse.y < f.origin.y + f.size.height
-        })
-        .unwrap_or(main);
-
-    let f = target.frame();
-    // 左下原点 → 左上原点
-    let top = main_height - (f.origin.y + f.size.height);
-    Some(center(f.origin.x, top, f.size.width, f.size.height, width, height))
+    let b = CGDisplay::main().bounds();
+    // 底部定位给 Dock 让位（CGDisplayBounds 是整屏，不扣 Dock）。
+    let h = match position {
+        Position::Bottom => (b.size.height - 90.0).max(0.0),
+        Position::Center => b.size.height,
+    };
+    Some(place(
+        b.origin.x,
+        b.origin.y,
+        b.size.width,
+        h,
+        width,
+        height,
+        position,
+    ))
 }
 
 /// Windows：`GetCursorPos` + 该点所在显示器的工作区（已扣掉任务栏）。
@@ -43,7 +61,7 @@ pub fn panel_origin(width: f32, height: f32) -> Option<(f32, f32)> {
 /// `WindowRef::set_bounds` 收的是**逻辑点**（内部再乘 DPI/96 换算）。所以这里必须
 /// 按该显示器的 scale 除一遍，否则 125%/150% 缩放下面板会跑偏。
 #[cfg(target_os = "windows")]
-pub fn panel_origin(width: f32, height: f32) -> Option<(f32, f32)> {
+pub fn panel_origin(width: f32, height: f32, position: Position) -> Option<(f32, f32)> {
     use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
@@ -76,13 +94,38 @@ pub fn panel_origin(width: f32, height: f32) -> Option<(f32, f32)> {
             f64::from(r.right - r.left) / scale,
             f64::from(r.bottom - r.top) / scale,
         );
-        Some(center(x, y, w, h, width, height))
+        Some(place(x, y, w, h, width, height, position))
     }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-pub fn panel_origin(_width: f32, _height: f32) -> Option<(f32, f32)> {
+pub fn panel_origin(_width: f32, _height: f32, _position: Position) -> Option<(f32, f32)> {
     None
+}
+
+/// 在 `(x, y, w, h)` 这块屏幕工作区里放一个 `width × height` 的框。
+fn place(
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    width: f32,
+    height: f32,
+    position: Position,
+) -> (f32, f32) {
+    match position {
+        Position::Center => center(x, y, w, h, width, height),
+        Position::Bottom => {
+            let (width, height) = (f64::from(width), f64::from(height));
+            let margin = 24.0;
+            let cx = x + ((w - width) / 2.0).max(0.0);
+            let cy = y + (h - height - margin).max(0.0);
+            (
+                cx.clamp(x, (x + w - width).max(x)) as f32,
+                cy.clamp(y, (y + h - height).max(y)) as f32,
+            )
+        }
+    }
 }
 
 /// 在 `(x, y, w, h)` 这块屏幕里居中放一个 `width × height` 的框，不超出边界。
@@ -99,7 +142,7 @@ fn center(x: f64, y: f64, w: f64, h: f64, width: f32, height: f32) -> (f32, f32)
 
 #[cfg(test)]
 mod tests {
-    use super::center;
+    use super::{Position, center, place};
 
     #[test]
     fn centers_in_the_screen() {
@@ -113,6 +156,13 @@ mod tests {
         // 副屏在主屏左边：原点是负数
         let (x, y) = center(-1920.0, 0.0, 1920.0, 1080.0, 480.0, 600.0);
         assert_eq!((x, y), (-1920.0 + 720.0, 240.0));
+    }
+
+    #[test]
+    fn bottom_position_sits_near_the_dock() {
+        let (x, y) = place(0.0, 0.0, 1440.0, 900.0, 480.0, 560.0, Position::Bottom);
+        assert_eq!(x, 480.0, "底部也是水平居中");
+        assert_eq!(y, 900.0 - 560.0 - 24.0);
     }
 
     #[test]

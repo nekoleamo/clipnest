@@ -66,6 +66,13 @@ nsh package --target windows
 2. **写剪贴板文件后前台会被抢回原应用**：面板还在但收不到键盘 → 导出成功后补一次 `focus_panel()`。
 3. **小图别让 `image` 重编码当缩略图**：128×128 的图 AppKit 编码 3.8K、`image` 重编码 39K（比原图还大）。只在最长边 > 320 时才真缩，否则拷原图字节。
 
+## 窗口位置与图片（P3/P6 实测）
+
+1. **`WindowRef::set_bounds` 对 `WindowKind::Popup` 无效**：运行中挪窗口完全不生效（探针设 (10,10)，窗口仍停在原处）。位置只能用 `window().default_position(WindowPosition::At(..))`，且**只在窗口创建时**生效；多屏/设置改动都要「下次启动」。
+2. **打包版 runner 里 `boot()` 不在主线程**：`MainThreadMarker::new()` 返回 `None`，`NSScreen`/`NSEvent` 都用不了。要屏幕信息就用 CoreGraphics（`CGDisplay::main().bounds()`，任意线程）。
+3. **`image().object_fit(ResizeMode::Contain)` 实测不生效**（按 Cover 裁切）：自己按 `width/height` 算显示尺寸。
+4. 文字别用 `muted_foreground`（暗色 9pt 下读不清），统一 `foreground`，层级靠字号。
+
 ## 状态与自检（P6 实测）
 
 1. **`Signal::set` 必须在组件的渲染体 / effect 里**：`boot()`（`run_app` 之前的纯函数）里 set 不报错但不触发重渲染（自检窗口因此在日志里「打开了」却从未出现）。跨线程改状态用「写 static → UI 里 `set_interval` 轮询」。

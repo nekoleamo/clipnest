@@ -24,6 +24,8 @@ pub struct Settings {
     pub max_items: i64,
     /// 面板高度（点）。
     pub panel_height: i32,
+    /// 面板位置：`center`（屏幕正中）或 `bottom`（贴屏幕底部，靠近输入位置）。
+    pub panel_position: String,
     /// 这些应用里复制的内容不进历史（bundle id / 进程名）。
     ///
     /// 空 = 用 `sensitive::DEFAULT_APPS` 的内置表；填了就以这里为准。
@@ -38,7 +40,8 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             max_items: 5000,
-            panel_height: 420,
+            panel_height: 560,
+            panel_position: "bottom".to_owned(),
             sensitive_apps: Vec::new(),
             ignore_sensitive_apps: true,
             export_dir: String::new(),
@@ -50,6 +53,9 @@ impl Settings {
     /// 把越界的值拉回合法范围（手改过 json 也安全）。
     pub fn normalized(mut self) -> Self {
         self.max_items = self.max_items.clamp(0, 1_000_000);
+        if self.panel_position != "center" && self.panel_position != "bottom" {
+            self.panel_position = "bottom".to_owned();
+        }
         self.panel_height = self.panel_height.clamp(PANEL_HEIGHT_MIN, PANEL_HEIGHT_MAX);
         self
     }
