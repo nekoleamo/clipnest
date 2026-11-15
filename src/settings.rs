@@ -24,6 +24,12 @@ pub struct Settings {
     pub max_items: i64,
     /// 面板高度（点）。
     pub panel_height: i32,
+    /// 这些应用里复制的内容不进历史（bundle id / 进程名）。
+    ///
+    /// 空 = 用 `sensitive::DEFAULT_APPS` 的内置表；填了就以这里为准。
+    pub sensitive_apps: Vec<String>,
+    /// 关掉就不按应用过滤（用户自担风险，自己用 `⌘E` 手动标)。
+    pub ignore_sensitive_apps: bool,
 }
 
 impl Default for Settings {
@@ -31,6 +37,8 @@ impl Default for Settings {
         Self {
             max_items: 5000,
             panel_height: 420,
+            sensitive_apps: Vec::new(),
+            ignore_sensitive_apps: true,
         }
     }
 }
@@ -99,6 +107,7 @@ mod tests {
         let want = Settings {
             max_items: 123,
             panel_height: 600,
+            ..Settings::default()
         };
         want.save(&paths).unwrap();
         assert!(paths.settings().exists());
@@ -129,6 +138,7 @@ mod tests {
         let s = Settings {
             max_items: -5,
             panel_height: 99_999,
+            ..Settings::default()
         }
         .normalized();
         assert_eq!(s.max_items, 0);
@@ -136,6 +146,7 @@ mod tests {
         let low = Settings {
             max_items: 1,
             panel_height: 1,
+            ..Settings::default()
         }
         .normalized();
         assert_eq!(low.panel_height, PANEL_HEIGHT_MIN);

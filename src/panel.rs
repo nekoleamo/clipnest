@@ -33,6 +33,8 @@ pub struct Row {
     pub thumb: Option<String>,
     pub pinned: bool,
     pub favorite: bool,
+    /// 被标记为敏感（密码之类）：行上显示 🔒，但仍可粘贴。
+    pub sensitive: bool,
 }
 
 impl Row {
@@ -46,6 +48,7 @@ impl Row {
             thumb: thumbnail_of(item),
             pinned: item.pinned,
             favorite: item.favorite,
+            sensitive: item.sensitive,
         }
     }
 }
@@ -205,30 +208,49 @@ pub fn remove(row: &Row) -> bool {
     }
 }
 
-/// 置顶 / 收藏切换。契约 6：这类改动不刷新 `updated_at`。
-pub fn toggle_flag(row: &Row, pin: bool) -> Option<bool> {
+/// 可以单独切换的标记。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Flag {
+    Pinned,
+    Favorite,
+    /// 敏感：密码管理器里复制的那些，用户可以单条改回来。
+    Sensitive,
+}
+
+/// 置顶 / 收藏 / 敏感 切换。契约 6：这类改动不刷新 `updated_at`。
+pub fn toggle_flag(row: &Row, flag: Flag) -> Option<bool> {
     let db = store::db()?;
     let conn = db.lock().ok()?;
     let item = db::items::get(&conn, row.id).ok()??;
-    let next = if pin { !item.pinned } else { !item.favorite };
-    let patch = if pin {
-        db::items::MetaPatch {
-            pinned: Some(next),
-            ..Default::default()
-        }
-    } else {
-        db::items::MetaPatch {
-            favorite: Some(next),
-            ..Default::default()
-        }
+    let (next, patch, tag) = match flag {
+        Flag::Pinned => (
+            !item.pinned,
+            db::items::MetaPatch {
+                pinned: Some(!item.pinned),
+                ..Default::default()
+            },
+            "PIN",
+        ),
+        Flag::Favorite => (
+            !item.favorite,
+            db::items::MetaPatch {
+                favorite: Some(!item.favorite),
+                ..Default::default()
+            },
+            "FAV",
+        ),
+        Flag::Sensitive => (
+            !item.sensitive,
+            db::items::MetaPatch {
+                sensitive: Some(!item.sensitive),
+                ..Default::default()
+            },
+            "SENS",
+        ),
     };
     match db::items::update_meta(&conn, item.id, &patch) {
         Ok(()) => {
-            logs::line(format!(
-                "{} id={} -> {next}",
-                if pin { "PIN" } else { "FAV" },
-                item.id
-            ));
+            logs::line(format!("{tag} id={} -> {next}", item.id));
             Some(next)
         }
         Err(e) => {
@@ -361,7 +383,7 @@ pub fn Panel() -> impl IntoElement {
         let (rows_p, sel_p, q_p) = (rows, sel, q);
         on_key_with("mod+p", arrows, move |_| {
             if let Some(row) = selected(&rows_p, &sel_p)
-                && toggle_flag(&row, true).is_some()
+                && toggle_flag(&row, Flag::Pinned).is_some()
             {
                 refresh(&rows_p, &sel_p, &q_p);
             }
@@ -371,9 +393,19 @@ pub fn Panel() -> impl IntoElement {
         let (rows_f, sel_f, q_f) = (rows, sel, q);
         on_key_with("mod+s", arrows, move |_| {
             if let Some(row) = selected(&rows_f, &sel_f)
-                && toggle_flag(&row, false).is_some()
+                && toggle_flag(&row, Flag::Favorite).is_some()
             {
                 refresh(&rows_f, &sel_f, &q_f);
+            }
+        });
+
+        // ⌘E 切换敏感标记（密码之类：内容已进库，用户自己决定要不要留）
+        let (rows_e, sel_e, q_e) = (rows, sel, q);
+        on_key_with("mod+e", arrows, move |_| {
+            if let Some(row) = selected(&rows_e, &sel_e)
+                && toggle_flag(&row, Flag::Sensitive).is_some()
+            {
+                refresh(&rows_e, &sel_e, &q_e);
             }
         });
 
@@ -454,7 +486,18 @@ pub fn Panel() -> impl IntoElement {
                         .gap_1()
                         .child(each(
                             rows_view,
-                            |row: &Row| row.id,
+                            // key 里带上影响显示的可变字段：`each` 只在 key 变时重建行，
+                            // 只用 id 的话改了置顶/收藏/敏感不会重画（实测锁图标不更新）。
+                            |row: &Row| {
+                                (
+                                    row.id,
+                                    row.pinned,
+                                    row.favorite,
+                                    row.sensitive,
+                                    row.summary.clone(),
+                                    row.time.clone(),
+                                )
+                            },
                             move |row, index| {
                                 let r = row.get();
                                 let i = index.get();
@@ -491,6 +534,7 @@ fn row_view(row: &Row, index: usize, sel: Signal<usize>) -> View {
     let time = row.time.clone();
     let pinned = row.pinned;
     let favorite = row.favorite;
+    let sensitive = row.sensitive;
     let thumb = row.thumb.clone();
     let sel_press = sel;
     let sel_bg = sel;
@@ -530,7 +574,11 @@ fn row_view(row: &Row, index: usize, sel: Signal<usize>) -> View {
                 .flex_col()
                 .flex_1()
                 .child(
-                    text(format!("{}{summary}", if pinned { "📌 " } else { "" }))
+                    text(format!(
+                        "{}{}{summary}",
+                        if pinned { "📌 " } else { "" },
+                        if sensitive { "🔒 " } else { "" }
+                    ))
                         .text_size(px(12.0))
                         .truncate()
                         .text_color(move || theme().foreground),

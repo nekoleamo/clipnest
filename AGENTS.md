@@ -60,6 +60,11 @@ nsh package --target windows
 24. 响应式列表用 `each(rows, |r| r.id, …)`：静态 `children` 不刷新，`dynamic` 整块重建会把搜索框焦点搞丢。行渲染函数返回具体 `View`（`impl IntoElement` 会带出 `&Row` 生命周期，E0515）。
 25. 面板激活自己会抢走前台：粘贴流程 = 写回 → `dismiss()`（隐藏 + `NSRunningApplication::activate` 原应用）→ 120 ms → ⌘V；原应用 pid 在打开前用 `NSWorkspace.frontmostApplication()` 记。
 
+## 列表与过滤（P3 实测）
+
+1. **`each(rows, |r| r.id, …)` 的 key 要带上影响显示的字段**：只用 id 时，改置顶/收藏/敏感不会重画（行内容是一次性快照），要把 `(id, pinned, favorite, sensitive, summary, time)` 都放进 key。
+2. 敏感过滤按**应用身份**（macOS bundle id / Windows 进程名）判定，别猜内容；名单见 `src/sensitive.rs`，`settings.json` 的 `sensitive_apps` 可覆盖，`ignore_sensitive_apps` 是总开关。
+
 ## 多屏与平台 API（P3 实测）
 
 1. **`nsh_core::element::desktop::displays()` 不能在 `run_on_main_thread` 回调里调用**：它读 nsh 的响应式环境，会 panic（`no reactive runtime`）。要屏幕信息就自己问系统（macOS `NSScreen`、Windows `MonitorFromPoint`），只把算好的坐标交给 `WindowRef::set_bounds`。

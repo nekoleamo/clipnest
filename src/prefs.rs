@@ -100,6 +100,42 @@ pub fn Prefs() -> impl IntoElement {
         note_reveal.set("已在访达中打开".to_owned());
     });
 
+    // 敏感应用过滤：点一下开关（名单本身在 settings.json 里改）。
+    let sens_now = current;
+    let note_sens = note;
+    let sens_toggle = view()
+        .px_3()
+        .py_1()
+        .rounded_md()
+        .bg(move || theme().secondary)
+        .on_press(move |_: &()| {
+            let on = !sens_now.with(|s| s.ignore_sensitive_apps);
+            let saved = apply(
+                sens_now,
+                Settings {
+                    ignore_sensitive_apps: on,
+                    ..sens_now.get()
+                },
+            );
+            note_sens.set(if saved.ignore_sensitive_apps {
+                "已开启：密码管理器里复制的不会进历史".to_owned()
+            } else {
+                "已关闭：任何应用的内容都会进历史".to_owned()
+            });
+        })
+        .child(
+            text(move || {
+                if sens_now.with(|s| s.ignore_sensitive_apps) {
+                    "已拦截（点我关掉）"
+                } else {
+                    "已关闭（点我开启）"
+                }
+            })
+            .text_size(px(11.0))
+            .text_color(move || theme().secondary_foreground),
+        );
+
+    let sens_count = crate::sensitive::list(&crate::settings()).len();
     let dir = crate::paths().root().display().to_string();
 
     view()
@@ -134,6 +170,15 @@ pub fn Prefs() -> impl IntoElement {
                         .text_color(move || theme().muted_foreground),
                 )
                 .child(reveal),
+        )
+        .child(
+            row()
+                .child(label("敏感应用"))
+                .child(sens_toggle)
+                .child(hint_dyn(format!(
+                    "{} 个内置应用（密码管理器/钥匙串）；名单可在 settings.json 的 sensitive_apps 里改",
+                    sens_count
+                ))),
         )
         .child(
             row()
@@ -192,6 +237,14 @@ fn label(t: &'static str) -> View {
 }
 
 fn hint(t: &'static str) -> View {
+    view().child(
+        text(t)
+            .text_size(px(9.0))
+            .text_color(move || theme().muted_foreground),
+    )
+}
+
+fn hint_dyn(t: String) -> View {
     view().child(
         text(t)
             .text_size(px(9.0))

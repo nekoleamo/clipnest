@@ -29,6 +29,7 @@ pub mod model;
 pub mod panel;
 pub mod paths;
 pub mod prefs;
+pub mod sensitive;
 pub mod settings;
 pub mod store;
 pub mod tray;
@@ -336,6 +337,16 @@ fn start_watcher() {
 
             if clipboard::is_self_write(now) {
                 logs::line(format!("SKIP self-write changeCount={now}"));
+                continue;
+            }
+
+            // 敏感应用里复制的直接丢（不写库、不落图片文件）。
+            let app = sensitive::front_app();
+            if sensitive::should_skip(&settings(), app.as_deref()) {
+                logs::line(format!(
+                    "SKIP sensitive app={}",
+                    app.as_deref().unwrap_or("<unknown>")
+                ));
                 continue;
             }
 
