@@ -9,7 +9,7 @@ use super::Result;
 use crate::model::{Item, ItemKind, NewItem, now};
 
 /// `items` 全列，顺序与 [`from_row`] 一致。
-const COLUMNS: &str = "id, content_hash, kind, content, file_types, width, height, \
+pub(crate) const COLUMNS: &str = "id, content_hash, kind, content, file_types, width, height, \
                        use_count, pinned, favorite, note, group_id, sensitive, \
                        created_at, updated_at";
 
