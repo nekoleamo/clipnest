@@ -5,10 +5,12 @@
 //! - [`store`]：采集结果落库
 //! - [`db`]：schema / 去重 / 查询搜索 / 加密备份（[`backup`]）
 //! - [`panel`]：面板（列表、搜索、粘贴动作）
+//! - [`prefs`] / [`settings`]：偏好设置窗与 `settings.json`
+//! - [`tray`]：菜单栏图标与菜单
 //!
 //! 所有观测写 `/tmp/clipnest.log`（`logs::line`），验证脚本读它。
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -25,7 +27,10 @@ pub mod logs;
 pub mod model;
 pub mod panel;
 pub mod paths;
+pub mod prefs;
+pub mod settings;
 pub mod store;
+pub mod tray;
 
 /// 供打包器/TSX 侧引用的模块注册（`nsh.json` 的 `"rust"`）。
 #[native_module("clipnest/native")]
@@ -36,8 +41,81 @@ fn native(registry: &mut Registry) {
 thread_local! {
     /// 面板窗口句柄（窗口内容渲染时拿到）。
     static PANEL: RefCell<Option<WindowRef>> = const { RefCell::new(None) };
-    /// 面板的 `open` 信号，供 [`dismiss`] 收起面板。
-    static OPEN: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
+}
+
+/// 面板 / 设置窗的 `open` 信号。放 static 而不是 thread_local：
+/// `set_timeout`、托盘菜单的回调可能在别的线程跑，thread_local 会拿到空值。
+static OPEN: OnceLock<Signal<bool>> = OnceLock::new();
+static PREFS: OnceLock<Signal<bool>> = OnceLock::new();
+
+/// 托盘只挂一次（可能有两个窗口各自渲染 App，用 static 而不是 thread_local）。
+static TRAY_ATTACHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+static PATHS: OnceLock<paths::Paths> = OnceLock::new();
+static SETTINGS: OnceLock<std::sync::Mutex<settings::Settings>> = OnceLock::new();
+
+/// 数据根目录（进程内唯一，按平台推断一次）。
+pub fn paths() -> &'static paths::Paths {
+    PATHS.get_or_init(paths::Paths::platform)
+}
+
+/// 当前设置（拷贝；读不到就给默认值）。
+pub fn settings() -> settings::Settings {
+    SETTINGS
+        .get_or_init(|| std::sync::Mutex::new(settings::Settings::load(paths())))
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default()
+}
+
+/// 存设置（越界值夹紧），成功返回 true。
+pub fn save_settings(next: settings::Settings) -> bool {
+    let s = next.normalized();
+    if let Err(e) = s.save(paths()) {
+        logs::line(format!("SETTINGS 写入失败：{e}"));
+        return false;
+    }
+    let cell = SETTINGS.get_or_init(|| std::sync::Mutex::new(s.clone()));
+    if let Ok(mut guard) = cell.lock() {
+        *guard = s;
+    }
+    true
+}
+
+/// 退出应用（托盘菜单用）。
+pub fn quit_app() {
+    logs::line("QUIT from tray".to_owned());
+    nsh_core::element::desktop::quit();
+}
+
+/// 显示/收起面板（快捷键与托盘共用）。
+pub fn toggle_panel() {
+    if let Some(open) = OPEN.get() {
+        let before = open.get();
+        open.set(!before);
+        logs::line(format!("PANEL toggle before={before} after={}", open.get()));
+        if !before {
+            // 面板会激活自己抢走键盘；先记下当前前台应用，粘贴时切回去。
+            run_on_main_thread(clipboard::remember_front_app);
+            focus_when_ready(0);
+        }
+    }
+}
+
+/// 打开设置窗。
+pub fn open_prefs() {
+    logs::line(format!("PREFS request had_signal={}", PREFS.get().is_some()));
+    if let Some(open) = PREFS.get() {
+        open.set(true);
+        logs::line("PREFS set true".to_owned());
+    }
+}
+
+/// 关掉设置窗。
+pub fn close_prefs() {
+    if let Some(open) = PREFS.get() {
+        open.set(false);
+    }
 }
 
 /// 面板被打开过多少次（面板据此判断要不要重查列表）。
@@ -50,11 +128,9 @@ pub fn opens() -> u64 {
 
 /// 收起面板（粘贴完成后由 `panel` 调用）。
 pub fn dismiss() {
-    OPEN.with(|slot| {
-        if let Some(open) = slot.get() {
-            open.set(false);
-        }
-    });
+    if let Some(open) = OPEN.get() {
+        open.set(false);
+    }
     // 面板抢了前台，收起时要还给用户原来那个应用；粘贴也走这条路
     // （`paste_after_write_back` 在 120 ms 后才发 ⌘V，切回已生效）。
     run_on_main_thread(clipboard::return_to_previous_app);
@@ -65,19 +141,23 @@ pub fn dismiss() {
 pub fn App() -> impl IntoElement {
     boot();
     let open = signal(false);
-    OPEN.with(|slot| slot.set(Some(open)));
+    let _ = OPEN.set(open);
+    let prefs_open = signal(false);
+    let _ = PREFS.set(prefs_open);
+
+    // 托盘：图标 + 菜单（显示面板 / 偏好设置 / 退出）。只挂一次。
+    effect(move || {
+        if TRAY_ATTACHED.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        tray::attach(toggle_panel, open_prefs);
+    });
 
     // 全局快捷键：切换面板。注册一次即可。
     effect(move || {
         let answer = register_global_shortcut("mod+shift+v", move || {
-            let before = open.get();
-            open.set(!before);
-            logs::line(format!("SHORTCUT before={before} after={}", open.get()));
-            if !before {
-                // 面板会激活自己抢走键盘；先记下当前前台应用，粘贴时切回去。
-                run_on_main_thread(clipboard::remember_front_app);
-                focus_when_ready(0);
-            }
+            logs::line("SHORTCUT mod+shift+v".to_owned());
+            toggle_panel();
         });
         spawn(async move {
             let ok = answer.await;
@@ -101,16 +181,26 @@ pub fn App() -> impl IntoElement {
         });
     });
 
+    // 自检：SPIKE_PREFS=1 时启动 3 秒后打开设置窗（托盘菜单不好自动化）。
+    if std::env::var("SPIKE_PREFS").is_ok() {
+        set_timeout(Duration::from_secs(3), open_prefs);
+    }
+
     // 自动弹出的自检：SPIKE_AUTOOPEN=1 时启动 4 秒后打开面板，用于测焦点。
     if std::env::var("SPIKE_AUTOOPEN").is_ok() {
         set_timeout(Duration::from_secs(4), move || open.set(true));
     }
 
-    view().flex_1().bg(move || theme().background).child(
+    let panel_height = settings().panel_height as f32;
+
+    view()
+        .flex_1()
+        .bg(move || theme().background)
+        .child(
         window()
             .id("panel")
             .kind(WindowKind::Popup)
-            .default_size(size(px(480.0), px(420.0)))
+            .default_size(size(px(settings::PANEL_WIDTH as f32), px(panel_height)))
             .attributes({
                 let mut attrs = WindowAttributes::for_kind(WindowKind::Popup);
                 // 激活自己：不激活的话 app 不 active，窗口永远成不了 key window，
@@ -150,7 +240,21 @@ pub fn App() -> impl IntoElement {
                 });
                 panel::panel()
             }),
-    )
+        )
+        .child(
+            window()
+                .id("prefs")
+                .kind(WindowKind::Dialog)
+                .default_size(size(px(540.0), px(340.0)))
+                .open(prefs_open)
+                .on_open_change(move |e| {
+                    if prefs_open.get() != e.open {
+                        prefs_open.set(e.open);
+                    }
+                    logs::line(format!("PREFS open={} reason={:?}", e.open, e.reason));
+                })
+                .content(|| prefs::prefs()),
+        )
 }
 
 /// 窗口在 commit 之后才创建，focus 偶尔会落空（P0 坑 6）：
@@ -280,5 +384,17 @@ pub fn boot() {
             store::count()
         ));
         start_watcher();
+
+        // 启动时按设置清理一次（上限改了以后下次启动补偿）。
+        let max_items = settings().max_items;
+        if let Some(db) = store::db()
+            && let Ok(conn) = db.lock()
+        {
+            match store::prune(&conn, max_items) {
+                Ok(n) if n > 0 => logs::line(format!("PRUNE startup removed={n} max={max_items}")),
+                Err(e) => logs::line(format!("PRUNE startup ERROR {e}")),
+                _ => {}
+            }
+        }
     });
 }

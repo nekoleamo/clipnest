@@ -110,6 +110,32 @@ pub fn open(paths: &Paths) -> Result<Connection, Box<dyn std::error::Error>> {
     Ok(db::open(paths.db())?)
 }
 
+/// 契约 9：按上限裁剪历史，收藏与置顶永远保留。
+///
+/// 只删「既不收藏也不置顶」里最旧的那些，`max_items` 是总条数上限，
+/// 受保护条目先把名额占掉。返回删除条数。
+pub fn prune(conn: &Connection, max_items: i64) -> rusqlite::Result<usize> {
+    if max_items <= 0 {
+        return Ok(0); // 0 = 不限
+    }
+    let protected: i64 = conn.query_row(
+        "SELECT count(*) FROM items WHERE pinned = 1 OR favorite = 1",
+        [],
+        |r| r.get(0),
+    )?;
+    let keep = (max_items - protected).max(0);
+    let deleted = conn.execute(
+        "DELETE FROM items WHERE id IN (
+             SELECT id FROM items
+             WHERE pinned = 0 AND favorite = 0
+             ORDER BY updated_at DESC, id DESC
+             LIMIT -1 OFFSET ?1
+         )",
+        [keep],
+    )?;
+    Ok(deleted)
+}
+
 /// 库里现有条目数，供启动日志与面板显示。
 pub fn count() -> Option<i64> {
     let conn = db()?.lock().ok()?;
@@ -119,6 +145,7 @@ pub fn count() -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::items::upsert;
     use crate::db::search::{Filter, Page, query};
 
     #[test]
@@ -183,6 +210,50 @@ mod tests {
         let hit = query(&conn, "a.txt", &Filter::default(), Page::default()).unwrap();
         assert_eq!(hit.len(), 1, "文件名要能被搜到");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prune_keeps_the_newest_and_protects_pinned_and_favorite() {
+        let conn = db::open_memory().unwrap();
+        let mut ids = Vec::new();
+        for i in 0..10 {
+            ids.push(
+                upsert(&conn, &NewItem::text(format!("条目{i}"))).unwrap().id(),
+            );
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        // 最旧的两条：一条置顶、一条收藏
+        items::update_meta(
+            &conn,
+            ids[0],
+            &crate::db::items::MetaPatch {
+                pinned: Some(true),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        items::update_meta(
+            &conn,
+            ids[1],
+            &crate::db::items::MetaPatch {
+                favorite: Some(true),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        // 上限 4：两条受保护 + 最新的两条
+        assert_eq!(prune(&conn, 4).unwrap(), 6);
+        let left = query(&conn, "", &Filter::default(), Page::new(100, 0)).unwrap();
+        assert_eq!(left.len(), 4);
+        let kept: Vec<i64> = left.iter().map(|i| i.id).collect();
+        assert!(kept.contains(&ids[0]) && kept.contains(&ids[1]), "受保护的不能删");
+        assert!(kept.contains(&ids[9]) && kept.contains(&ids[8]), "最新的要留");
+
+        // 0 = 不限；超过上限的受保护条目也不会删
+        assert_eq!(prune(&conn, 0).unwrap(), 0);
+        assert_eq!(prune(&conn, 1).unwrap(), 2, "名额被受保护条目占满时只删其余的");
+        assert_eq!(items::count(&conn).unwrap(), 2);
     }
 
     #[test]

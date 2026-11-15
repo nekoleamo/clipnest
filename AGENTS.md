@@ -47,7 +47,10 @@ nsh test
 15. 列表要包 `dynamic(|| ...)`；静态 `children(...)` 不刷新（底部响应式计数会正常，容易误判成「列表没问题」）。
 16. `#[component] fn Panel()` 的构造器是**小写** `panel()`（宏生成 `PanelElement` + `panel()`），`Panel()` 编译不过。
 17. `run_app` 总会开一个主窗口，常驻应用要在根组件里 `current_window().hide()`。
-18. 面板激活自己会抢走前台：粘贴流程 = 写回 → `dismiss()`（隐藏 + `NSRunningApplication::activate` 原应用）→ 120 ms → ⌘V；原应用 pid 在打开前用 `NSWorkspace.frontmostApplication()` 记。
+18. **`Signal` 要放 `static`，不要放 `thread_local`**：`set_timeout`、托盘菜单的回调可能不在主线程，thread_local 里读到的是 `None`（设置窗因此打不开）。`Signal` 是 `Copy + Send + Sync`；`WindowRef`/`ElementRef` 才留在 thread_local。
+19. 托盘图标 16 pt 纯图标既难确认也点不准：给 `Tray::title()` 配一个字符（如 `❐`），`System Events` 就能按名字点到。SVG 图标走模板渲染，笔画只用 `black`。
+20. 受控 `input`（`.value(信号)`）在 `on_change` 里必须同步更新那个信号，否则输入被回滚。
+21. 面板激活自己会抢走前台：粘贴流程 = 写回 → `dismiss()`（隐藏 + `NSRunningApplication::activate` 原应用）→ 120 ms → ⌘V；原应用 pid 在打开前用 `NSWorkspace.frontmostApplication()` 记。
 
 ## 代码检索
 
