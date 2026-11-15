@@ -71,7 +71,10 @@ nsh package --target windows
 1. **`sync.json` 独立于 `settings.json`**，口令一律进系统钥匙串；配置文件里出现密码就是 bug。
 2. serde `rename_all = "snake_case"` 会把 `WebDav` 写成 `web_dav`，要显式 `#[serde(rename = "webdav")]`。
 3. `boot()` 不在响应式上下文里：别在里面调 `set_timeout` / `signal`（会 panic `no reactive runtime`），用普通线程。
-4. WebDAV 先 `PROPFIND Depth:1` 列文件，404 时 `MKCOL` 建目录；`insecure_tls` 目前不生效（ureq/rustls 没有简单开关）。
+4. WebDAV 实现用 **reqwest**（blocking + rustls + http2）：ureq 的协议层只允许标准方法，**发不出 PROPFIND**（实测 `PROPFIND not valid for HTTP version HTTP/1.1`）。
+5. reqwest 必须 `.no_proxy()`：本机 `HTTPS_PROXY` 会把局域网 IP 也送进代理，每个请求卡到 20 秒超时。
+6. 飞牛 fnOS：根目录只读（`MKCOL`/`PUT` 都 405），要用 `/data/...`；父目录不存在时回 **403**（不是 409），`put()` 要按 403/404/409 都先 `MKCOL`。
+7. 自签证书走 `danger_accept_invalid_certs`（`sync.json` 的 `insecure_tls`）。
 
 ## 开机自启与权限（P3 实测）
 

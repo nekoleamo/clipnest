@@ -260,6 +260,21 @@ pub fn App() -> impl IntoElement {
         });
     });
 
+    // 定时同步：间隔来自 sync.json（改完重启生效）。0 或 <60 秒不自动跑。
+    effect(move || {
+        let cfg = sync_config();
+        let secs = cfg.interval_secs;
+        if !cfg.enabled || secs < 60 {
+            return;
+        }
+        logs::line(format!("SYNC interval={secs}s"));
+        set_interval(Duration::from_secs(secs), || {
+            if sync_config().enabled {
+                start_sync();
+            }
+        });
+    });
+
     // nsh 的 run_app 总会开一个主窗口；clipnest 是常驻应用，主窗口不该露出来。
     //
     // 不能 hide()：主窗口一隐藏，应用就不算 active，面板永远成不了 key window

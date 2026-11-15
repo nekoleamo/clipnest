@@ -41,11 +41,14 @@ pub fn open(config: &SyncConfig) -> Result<Box<dyn Transport>, String> {
 }
 
 /// WebDAV：一台设备一个文件，PROPFIND 列目录。
+///
+/// 用 reqwest 而不是 ureq：ureq 的协议层只允许标准方法，**发不出 PROPFIND**
+/// （实测 `PROPFIND not valid for HTTP version HTTP/1.1`）。
 pub struct WebDavTransport {
-    agent: ureq::Agent,
+    client: reqwest::blocking::Client,
     base: String,
-    /// Basic 认证头（`Basic base64(user:pass)`）。
-    authorization: String,
+    username: String,
+    password: String,
 }
 
 impl WebDavTransport {
@@ -59,25 +62,19 @@ impl WebDavTransport {
         if !base.starts_with("http://") && !base.starts_with("https://") {
             return Err("WebDAV 地址要以 http:// 或 https:// 开头".to_owned());
         }
-        let agent = if insecure_tls {
-            let tls = ureq::tls::TlsConfig::builder()
-                .disable_verification(true)
-                .build();
-            ureq::Agent::new_with_config(
-                ureq::Agent::config_builder()
-                    .tls_config(tls)
-                    .build(),
-            )
-        } else {
-            ureq::Agent::new_with_defaults()
-        };
+        let client = reqwest::blocking::Client::builder()
+            .danger_accept_invalid_certs(insecure_tls)
+            // 同步目标是局域网/自建服务，绝不该走系统代理（否则会卡到超时）。
+            .no_proxy()
+            // NAS 多半是局域网自签证书，超时别等太久。
+            .timeout(std::time::Duration::from_secs(20))
+            .build()
+            .map_err(|e| format!("建 HTTP 客户端失败：{e}"))?;
         Ok(Self {
-            agent,
+            client,
             base: base.to_owned(),
-            authorization: format!(
-                "Basic {}",
-                base64_encode(format!("{username}:{password}").as_bytes())
-            ),
+            username: username.to_owned(),
+            password: password.to_owned(),
         })
     }
 
@@ -85,7 +82,7 @@ impl WebDavTransport {
         format!("{}{}", self.base, name)
     }
 
-    /// 发一个任意方法的请求（PROPFIND 不在 ureq 的快捷方法里）。
+    /// 发一个任意方法的请求（PROPFIND/MKCOL 都不是标准方法）。
     fn request(
         &self,
         method: &str,
@@ -93,25 +90,30 @@ impl WebDavTransport {
         extra: &[(&str, &str)],
         body: Vec<u8>,
     ) -> Result<(u16, Vec<u8>), String> {
-        let mut builder = ureq::http::Request::builder()
-            .method(method)
-            .uri(url)
-            .header("Authorization", &self.authorization);
+        let method_str = method.to_owned();
+        let method = reqwest::Method::from_bytes(method.as_bytes())
+            .map_err(|e| format!("方法名不对：{e}"))?;
+        let mut request = self
+            .client
+            .request(method, url)
+            .basic_auth(&self.username, Some(&self.password));
         for (k, v) in extra {
-            builder = builder.header(*k, *v);
+            request = request.header(*k, *v);
         }
-        let request = builder
+        let started = std::time::Instant::now();
+        let mut response = request
             .body(body)
-            .map_err(|e| format!("构造请求失败：{e}"))?;
-        let mut response = self
-            .agent
-            .run(request)
-            .map_err(|e| format!("请求 {method} {url} 失败：{e}"))?;
+            .send()
+            .map_err(|e| format!("请求 {url} 失败：{e}"))?;
         let status = response.status().as_u16();
-        let bytes = response
-            .body_mut()
-            .read_to_vec()
+        let mut bytes = Vec::new();
+        response
+            .copy_to(&mut bytes)
             .map_err(|e| format!("读响应失败：{e}"))?;
+        let ms = started.elapsed().as_millis();
+        if ms > 500 {
+            crate::logs::line(format!("SYNC slow {method_str} {url} {status} {ms}ms"));
+        }
         Ok((status, bytes))
     }
 }
@@ -128,10 +130,10 @@ impl Transport for WebDavTransport {
         )?;
         // 目录不存在时先建（有的 NAS 不会自动建）。
         if status == 404 {
-            let (put_status, _) =
+            let (created, _) =
                 self.request("MKCOL", self.base.trim_end_matches('/'), &[], Vec::new())?;
-            if put_status >= 400 {
-                return Err(format!("远端目录不存在，创建也失败（{put_status}）"));
+            if created >= 400 && created != 405 {
+                return Err(format!("远端目录不存在，创建也失败（{created}）"));
             }
             return Ok(Vec::new());
         }
@@ -162,15 +164,15 @@ impl Transport for WebDavTransport {
 
     fn put(&self, name: &str, bytes: &[u8]) -> Result<(), String> {
         let url = self.url(name);
-        let body = bytes.to_vec();
         let (status, _) = self.request(
             "PUT",
             &url,
             &[("Content-Type", "application/octet-stream")],
-            body.clone(),
+            bytes.to_vec(),
         )?;
-        // 子目录（`blobs/1a/`）可能还不存在：409/404 先 MKCOL 再重试一次。
-        if status == 409 || status == 404 {
+        // 子目录（`blobs/1a/`）可能还不存在。各家的回答不一样：标准是 409，
+        // 但也见过 404，飞牛（fnOS）直接回 403——都当"父目录没有"处理。
+        if matches!(status, 403 | 404 | 409) {
             let mut parent = self.base.clone();
             let parts: Vec<&str> = name.split('/').collect();
             for dir in &parts[..parts.len().saturating_sub(1)] {
@@ -182,7 +184,7 @@ impl Transport for WebDavTransport {
                 "PUT",
                 &url,
                 &[("Content-Type", "application/octet-stream")],
-                body,
+                bytes.to_vec(),
             )?;
             if retry >= 400 {
                 return Err(format!("上传 {name} 失败（HTTP {retry}）"));
@@ -227,46 +229,10 @@ fn hrefs(xml: &str) -> Vec<String> {
     out
 }
 
-/// 最简 base64（Basic 认证用；不引依赖）。
-fn base64_encode(input: &[u8]) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::new();
-    for chunk in input.chunks(3) {
-        let b = [
-            chunk[0],
-            *chunk.get(1).unwrap_or(&0),
-            *chunk.get(2).unwrap_or(&0),
-        ];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-        out.push(TABLE[((n >> 18) & 63) as usize] as char);
-        out.push(TABLE[((n >> 12) & 63) as usize] as char);
-        out.push(if chunk.len() > 1 {
-            TABLE[((n >> 6) & 63) as usize] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            TABLE[(n & 63) as usize] as char
-        } else {
-            '='
-        });
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::sync::config::SyncConfig;
-
-    #[test]
-    fn base64_matches_known_values() {
-        assert_eq!(base64_encode(b""), "");
-        assert_eq!(base64_encode(b"f"), "Zg==");
-        assert_eq!(base64_encode(b"fo"), "Zm8=");
-        assert_eq!(base64_encode(b"foo"), "Zm9v");
-        assert_eq!(base64_encode(b"me:pass"), "bWU6cGFzcw==");
-    }
 
     #[test]
     fn hrefs_are_pulled_out_of_propfind_xml() {
@@ -304,6 +270,43 @@ mod tests {
             ..SyncConfig::default()
         };
         assert!(open(&c).is_ok());
+    }
+
+    /// 真机联调：口令从系统钥匙串读，命令行不留明文。
+    ///
+    /// ```bash
+    /// WEBDAV_URL=https://192.168.1.2:5006/clipnest/ WEBDAV_USER=me \
+    ///   cargo test live_webdav_probe -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "需要真实 NAS 与钥匙串里的凭据"]
+    fn live_webdav_probe() {
+        let url = std::env::var("WEBDAV_URL").expect("WEBDAV_URL");
+        let user = std::env::var("WEBDAV_USER").expect("WEBDAV_USER");
+        let password = crate::sync::secret::get(crate::sync::config::WEBDAV_SECRET_SERVICE, &user)
+            .expect("钥匙串里没有这个账号的密码");
+        let t = WebDavTransport::new(&url, &user, &password, true).expect("建 client");
+        match t.list() {
+            Ok(files) => println!("list OK: {files:?}"),
+            Err(e) => println!("list ERROR: {e}"),
+        }
+        // 下载别的设备的真实包（验证 GET 路径）
+        let t0 = std::time::Instant::now();
+        match t.get("mac-a.json") {
+            Ok(bytes) => println!("get mac-a.json: {} 字节, {:?}", bytes.len(), t0.elapsed()),
+            Err(e) => println!("get mac-a.json ERROR ({:?}): {e}", t0.elapsed()),
+        }
+
+        // 顺便验证一次写入/读回/删除
+        let name = "probe-test.json";
+        match t.put(name, b"{\"probe\":true}") {
+            Ok(()) => {
+                println!("put OK");
+                println!("get: {:?}", t.get(name).map(|b| String::from_utf8_lossy(&b).to_string()));
+                println!("remove: {:?}", t.remove(name));
+            }
+            Err(e) => println!("put ERROR: {e}"),
+        }
     }
 
     #[test]
