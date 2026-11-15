@@ -10,10 +10,10 @@ import (
 func TestLayoutIsInsideRoot(t *testing.T) {
 	p := FromRoot("/tmp/x")
 	checks := map[string]string{
-		p.DB():         "/tmp/x/clipnest.db",
-		p.Settings():   "/tmp/x/settings.json",
-		p.SyncConfig(): "/tmp/x/sync.json",
-		p.BackupsDir(): "/tmp/x/backups",
+		p.DB():              "/tmp/x/clipnest.db",
+		p.Settings():        "/tmp/x/settings.json",
+		p.SyncConfig():      "/tmp/x/sync.json",
+		p.BackupsDir():      "/tmp/x/backups",
 		p.Backup("a.cnbak"): "/tmp/x/backups/a.cnbak",
 	}
 	for got, want := range checks {
