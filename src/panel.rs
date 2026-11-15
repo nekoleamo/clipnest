@@ -567,41 +567,46 @@ pub fn Panel() -> impl IntoElement {
         .bg(move || theme().background)
         .child(ax_banner())
         .child(field)
-        .child(dynamic(move || preview(rows_pv, sel_pv)))
         .child(
-            scroll()
-                .element_ref(&list)
+            // 左：列表；右：选中图片时的大图预览（横向，窗口不会因为预览而“往下长”）
+            view()
+                .flex()
+                .flex_row()
                 .flex_1()
+                .gap_2()
                 .child(
-                    // 用 `each` 而不是静态 children：静态列表停在首帧（不刷新）；
-                    // `dynamic` 会整块重建，删一条就让搜索框失焦、面板被 blur 关掉。
-                    // `each` 带 key，只增删变化的那一行。
-                    view()
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .child(each(
-                            rows_view,
-                            // key 里带上影响显示的可变字段：`each` 只在 key 变时重建行，
-                            // 只用 id 的话改了置顶/收藏/敏感不会重画（实测锁图标不更新）。
-                            |row: &Row| {
-                                (
-                                    row.id,
-                                    row.pinned,
-                                    row.favorite,
-                                    row.sensitive,
-                                    row.summary.clone(),
-                                    row.time.clone(),
-                                )
-                            },
-                            move |row, index| {
-                                let r = row.get();
-                                let i = index.get();
-                                row_view(&r, i, sel_view)
-                            },
-                        ))
-                        .child(empty_hint(rows_view)),
-                ),
+                    scroll()
+                        .element_ref(&list)
+                        .flex_1()
+                        .child(
+                            view()
+                                .flex()
+                                .flex_col()
+                                .gap_1()
+                                .child(each(
+                                    rows_view,
+                                    // key 带上影响显示的可变字段：`each` 只在 key 变时重建行，
+                                    // 只用 id 的话改了置顶/收藏/敏感不会重画（实测锁图标不更新）。
+                                    |row: &Row| {
+                                        (
+                                            row.id,
+                                            row.pinned,
+                                            row.favorite,
+                                            row.sensitive,
+                                            row.summary.clone(),
+                                            row.time.clone(),
+                                        )
+                                    },
+                                    move |row, index| {
+                                        let r = row.get();
+                                        let i = index.get();
+                                        row_view(&r, i, sel_view)
+                                    },
+                                ))
+                                .child(empty_hint(rows_view)),
+                        ),
+                )
+                .child(dynamic(move || preview(rows_pv, sel_pv))),
         )
         .child(
             text(move || {
@@ -617,7 +622,7 @@ pub fn Panel() -> impl IntoElement {
                     )
                 }
             })
-            .text_size(px(9.0))
+            .text_size(px(11.0))
             .text_color(move || theme().foreground),
         )
 }
@@ -729,23 +734,39 @@ fn ax_banner() -> View {
 
 /// 选中图片时的大图预览（占列表上方一块，等比缩放不裁切）。
 fn preview(rows: Signal<Vec<Row>>, sel: Signal<usize>) -> AnyElement {
-    let path = rows.with(|r| r.get(sel.get()).and_then(|row| row.origin.clone()));
-    match path {
-        Some(path) => view()
-            .w_full()
-            .h(px(240.0))
-            .rounded_md()
-            .bg(move || theme().muted)
-            .child(
-                image(path)
-                    .w_full()
-                    .h(px(240.0))
-                    .object_fit(nsh_core::ResizeMode::Contain)
-                    .rounded_md(),
-            )
-            .into_element(),
-        None => view().h(px(0.0)).into_element(),
-    }
+    const BOX_W: f32 = 280.0;
+    const BOX_H: f32 = 400.0;
+
+    let picked = rows.with(|r| r.get(sel.get()).cloned());
+    let Some(row) = picked else {
+        return view().w(px(0.0)).into_element();
+    };
+    let Some(path) = row.origin.clone() else {
+        return view().w(px(0.0)).into_element();
+    };
+
+    // 自己算等比尺寸：`image().object_fit(Contain)` 实测没生效（按 Cover 裁切了）。
+    let (iw, ih) = (
+        row.width.unwrap_or(0) as f32,
+        row.height.unwrap_or(0) as f32,
+    );
+    let (dw, dh) = if iw > 1.0 && ih > 1.0 {
+        let scale = (BOX_W / iw).min(BOX_H / ih).min(1.0);
+        (iw * scale, ih * scale)
+    } else {
+        (BOX_W, BOX_H)
+    };
+
+    view()
+        .w(px(BOX_W))
+        // 不定高：flex_row 里默认 stretch，纵向跟着列表一样高
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded_md()
+        .bg(move || theme().muted)
+        .child(image(path).w(px(dw)).h(px(dh)).rounded_md())
+        .into_element()
 }
 
 /// 图片条目的缩略图（40pt 方形，没有就占位不画）。

@@ -13,8 +13,8 @@ use crate::paths::Paths;
 pub const PANEL_HEIGHT_MIN: i32 = 240;
 pub const PANEL_HEIGHT_MAX: i32 = 1200;
 
-/// 面板宽度（固定，P2 不开放调整）。
-pub const PANEL_WIDTH: i32 = 480;
+/// 面板宽度（固定：左边列表 + 右边图片预览）。
+pub const PANEL_WIDTH: i32 = 720;
 
 /// 用户设置。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
