@@ -175,6 +175,26 @@ impl Item {
     }
 }
 
+/// 面板里显示的相对时间：一分钟内「刚刚」，之后按分钟/小时/天数，超过一周给日期。
+pub fn relative_time(ts: &str) -> String {
+    let Ok(at) = chrono::DateTime::parse_from_rfc3339(ts) else {
+        return ts.to_owned();
+    };
+    let at = at.with_timezone(&chrono::Utc);
+    let secs = (chrono::Utc::now() - at).num_seconds();
+    match secs {
+        s if s < 0 => "刚刚".to_owned(),
+        s if s < 60 => "刚刚".to_owned(),
+        s if s < 3600 => format!("{} 分钟前", s / 60),
+        s if s < 86_400 => format!("{} 小时前", s / 3600),
+        s if s < 7 * 86_400 => format!("{} 天前", s / 86_400),
+        _ => at
+            .with_timezone(&chrono::Local)
+            .format("%Y-%m-%d")
+            .to_string(),
+    }
+}
+
 /// 分组（`groups` 表）。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Group {
@@ -242,6 +262,21 @@ mod tests {
         assert_eq!(item.excerpt(40), "第一行 第二行很长很长");
         item.content = "一二三四五".to_owned();
         assert_eq!(item.excerpt(3), "一二三…");
+    }
+
+    #[test]
+    fn relative_time_reads_like_a_human() {
+        let at = |secs: i64| {
+            (chrono::Utc::now() - chrono::Duration::seconds(secs))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        };
+        assert_eq!(relative_time(&at(5)), "刚刚");
+        assert_eq!(relative_time(&at(90)), "1 分钟前");
+        assert_eq!(relative_time(&at(3 * 3600)), "3 小时前");
+        assert_eq!(relative_time(&at(3 * 86_400)), "3 天前");
+        let old = relative_time(&at(40 * 86_400));
+        assert_eq!(old.len(), 10, "超过一周给日期：{old}");
+        assert_eq!(relative_time("不是时间"), "不是时间");
     }
 
     #[test]

@@ -134,6 +134,15 @@ pub fn update_meta(conn: &Connection, id: i64, patch: &MetaPatch) -> Result<()> 
     Ok(())
 }
 
+/// 契约 5 的「使用一次」：`use_count + 1` 并刷新 `updated_at`（粘贴成功时调用）。
+pub fn touch(conn: &Connection, id: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE items SET use_count = use_count + 1, updated_at = ?1 WHERE id = ?2",
+        params![now(), id],
+    )?;
+    Ok(())
+}
+
 /// 按 id 取一条。
 pub fn get(conn: &Connection, id: i64) -> Result<Option<Item>> {
     let sql = format!("SELECT {COLUMNS} FROM items WHERE id = ?1");
@@ -248,6 +257,19 @@ mod tests {
         assert!(after.pinned && after.favorite);
         assert_eq!(after.note.as_deref(), Some("重要"));
         assert!(after.updated_at > mid.updated_at);
+    }
+
+    #[test]
+    fn touch_counts_one_use_and_refreshes_time() {
+        let conn = open_memory().unwrap();
+        let id = upsert(&conn, &NewItem::text("粘贴即使用")).unwrap().id();
+        let before = get(&conn, id).unwrap().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        touch(&conn, id).unwrap();
+        let after = get(&conn, id).unwrap().unwrap();
+        assert_eq!(after.use_count, before.use_count + 1);
+        assert!(after.updated_at > before.updated_at);
+        assert_eq!(after.created_at, before.created_at);
     }
 
     #[test]

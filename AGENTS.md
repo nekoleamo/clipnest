@@ -38,6 +38,17 @@ nsh test
 4. **不要用 `nsh_core::data_dir()` 当数据根**：它返回 `<数据目录>/<app id>`（`com.example.clipnest`）且依赖 nsh 运行时，`cargo test` 里拿不到；根目录统一走 `src/paths.rs`。
 5. 编辑库里加列/加表只能追加迁移脚本（`src/db/schema.rs` 的 `MIGRATIONS`），已发布的脚本不可改。
 
+### 面板/键盘（P2 实测）
+
+11. **`WindowKind::Popup` 必须 `activate = Some(true)`** 才能收键盘：app 不 active 时 `key=None active=false`，字符全被前台应用吃掉。（P0 记录的「`activate=false` 也能打字」在 0.5.1 当前构建上不成立。）
+12. **`WindowRef::focus()` 必须从主线程调用**：`set_timeout` 的回调里 `MainThreadMarker::new()` 返回 `None`，从那儿调 AppKit 是空操作 → 面板永远成不了 key。要 `run_on_main_thread(...)`。
+13. 输入框 `auto_focus(true)` 拿 field editor 就够了；**再手动 `focus()` 一次会让输入失效**（field editor 重挂）。
+14. 焦点在 `input` 里时 **Esc / ↑↓ 都被输入框吃掉**：必须 `on_key_with(..., When::Always, ...)` 自己绑。⏎ 用 `input().on_submit`。
+15. 列表要包 `dynamic(|| ...)`；静态 `children(...)` 不刷新（底部响应式计数会正常，容易误判成「列表没问题」）。
+16. `#[component] fn Panel()` 的构造器是**小写** `panel()`（宏生成 `PanelElement` + `panel()`），`Panel()` 编译不过。
+17. `run_app` 总会开一个主窗口，常驻应用要在根组件里 `current_window().hide()`。
+18. 面板激活自己会抢走前台：粘贴流程 = 写回 → `dismiss()`（隐藏 + `NSRunningApplication::activate` 原应用）→ 120 ms → ⌘V；原应用 pid 在打开前用 `NSWorkspace.frontmostApplication()` 记。
+
 ## 代码检索
 
 本仓库已有 `.codegraph/` 索引（codegraph 1.6.2）。改代码前优先走 codegraph MCP（`codegraph_explore`，传 `projectPath=/Users/nekoleamo/Documents/Working/clipnest`），不要逐个 grep/read。改动较大后重建：`codegraph init`（增量）或 `codegraph status` 查是否过期。

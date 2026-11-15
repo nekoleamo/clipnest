@@ -1,38 +1,63 @@
-//! nsh 剪贴板管理器可行性 spike（macOS）。
+//! clipnest：跨平台剪贴板历史管理器（macOS 先行）。
 //!
-//! 验证四件事：
-//! V1 Popup 窗口能否在不抢焦点的情况下弹出（activationPolicy=accessory + WindowKind::Popup）
-//! V2 剪贴板多 flavor（text / html / rtf / image / files）能否读取，changeCount 轮询延迟多少
-//! V3 写回回环抑制（自身写回不产生新记录）
-//! V4 关闭 nsh 全部可选特性后，产物体积与构建时间
+//! 本文件只放组件与 UI 装配；其余各在自己的模块：
+//! - [`clipboard`]：采集、写回、⌘V 注入、回环抑制
+//! - [`store`]：采集结果落库
+//! - [`db`]：schema / 去重 / 查询搜索 / 加密备份（[`backup`]）
+//! - [`panel`]：面板（列表、搜索、粘贴动作）
 //!
-//! 所有观测写入 /tmp/clipnest.log，便于脚本断言。
+//! 所有观测写 `/tmp/clipnest.log`（`logs::line`），验证脚本读它。
 
-use std::cell::RefCell;
-use std::sync::{Arc, Mutex, OnceLock};
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::cell::{Cell, RefCell};
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-
-pub mod backup;
-pub mod db;
-pub mod model;
-pub mod paths;
-pub mod store;
 
 use nsh_base::theme;
 use nsh_core::desktop::{WindowAttributes, WindowKind};
 use nsh_core::element::desktop::{WindowRef, current_window, register_global_shortcut, window};
 use nsh_core::prelude::*;
 
-/// 供打包器/TSX 侧引用的模块注册（`nsh.json` `"rust"`）。
+pub mod backup;
+pub mod clipboard;
+pub mod db;
+pub mod logs;
+pub mod model;
+pub mod panel;
+pub mod paths;
+pub mod store;
+
+/// 供打包器/TSX 侧引用的模块注册（`nsh.json` 的 `"rust"`）。
 #[native_module("clipnest/native")]
 fn native(registry: &mut Registry) {
     registry.register::<App>();
 }
 
 thread_local! {
-    /// 面板窗口的句柄（渲染时拿到）。
+    /// 面板窗口句柄（窗口内容渲染时拿到）。
     static PANEL: RefCell<Option<WindowRef>> = const { RefCell::new(None) };
+    /// 面板的 `open` 信号，供 [`dismiss`] 收起面板。
+    static OPEN: Cell<Option<Signal<bool>>> = const { Cell::new(None) };
+}
+
+/// 面板被打开过多少次（面板据此判断要不要重查列表）。
+static OPENS: AtomicU64 = AtomicU64::new(0);
+
+/// 打开计数，面板用它发现「又开了一次」。
+pub fn opens() -> u64 {
+    OPENS.load(Ordering::Relaxed)
+}
+
+/// 收起面板（粘贴完成后由 `panel` 调用）。
+pub fn dismiss() {
+    OPEN.with(|slot| {
+        if let Some(open) = slot.get() {
+            open.set(false);
+        }
+    });
+    // 面板抢了前台，收起时要还给用户原来那个应用；粘贴也走这条路
+    // （`paste_after_write_back` 在 120 ms 后才发 ⌘V，切回已生效）。
+    run_on_main_thread(clipboard::return_to_previous_app);
 }
 
 /// 应用自身的根组件。
@@ -40,46 +65,39 @@ thread_local! {
 pub fn App() -> impl IntoElement {
     boot();
     let open = signal(false);
-    let lines = signal(String::from("waiting…"));
-
-    // 面板里的行：轮询共享日志，避免跨线程碰 signal。
-    set_interval(Duration::from_millis(400), move || {
-        let snap = items()
-            .lock()
-            .map(|v| {
-                v.iter()
-                    .rev()
-                    .take(6)
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            })
-            .unwrap_or_default();
-        lines.set(snap);
-    });
+    OPEN.with(|slot| slot.set(Some(open)));
 
     // 全局快捷键：切换面板。注册一次即可。
     effect(move || {
         let answer = register_global_shortcut("mod+shift+v", move || {
             let before = open.get();
             open.set(!before);
-            log_line(format!("SHORTCUT before={before} after={}", open.get()));
+            logs::line(format!("SHORTCUT before={before} after={}", open.get()));
             if !before {
-                // 窗口在 commit 后才创建：延后一拍再取 key 焦点
-                set_timeout(Duration::from_millis(120), || {
-                    PANEL.with(|slot| match slot.borrow().as_ref() {
-                        Some(panel) => {
-                            panel.focus();
-                            log_line(format!("PANEL focus() after open, canKey? state={:?}", panel.state().is_some()));
-                        }
-                        None => log_line("PANEL ref not ready".to_owned()),
-                    });
-                });
+                // 面板会激活自己抢走键盘；先记下当前前台应用，粘贴时切回去。
+                run_on_main_thread(clipboard::remember_front_app);
+                focus_when_ready(0);
             }
         });
         spawn(async move {
             let ok = answer.await;
-            log_line(format!("BOOT shortcut mod+shift+v registered ok={ok}"));
+            logs::line(format!("BOOT shortcut mod+shift+v registered ok={ok}"));
+        });
+    });
+
+    // nsh 的 run_app 总会开一个主窗口；clipnest 是常驻应用，主窗口不该露出来。
+    effect(move || {
+        if std::env::var("SPIKE_NO_HIDE").is_ok() {
+            return;
+        }
+        let main = current_window();
+        set_timeout(Duration::from_millis(60), move || {
+            main.hide();
+            logs::line(format!(
+                "MAIN window hidden id={} main={}",
+                main.id(),
+                main.is_main()
+            ));
         });
     });
 
@@ -92,19 +110,35 @@ pub fn App() -> impl IntoElement {
         window()
             .id("panel")
             .kind(WindowKind::Popup)
-            .default_size(size(px(420.0), px(320.0)))
+            .default_size(size(px(480.0), px(420.0)))
             .attributes({
                 let mut attrs = WindowAttributes::for_kind(WindowKind::Popup);
-                attrs.activate = Some(std::env::var("SPIKE_ACTIVATE").is_ok());
+                // 激活自己：不激活的话 app 不 active，窗口永远成不了 key window，
+                // 键盘全被前台应用吃掉（实测 key=None active=false）。
+                // 粘贴时用 clipboard::return_to_previous_app() 切回去。
+                attrs.activate = Some(std::env::var("SPIKE_NO_ACTIVATE").is_err());
                 attrs
             })
             .open(open)
             .on_open_change(move |e| {
-                log_line(format!(
+                // 系统也会关窗口（Esc / 失焦）：把 signal 拉回来，
+                // 否则下次快捷键会把「以为还开着」的 open 置成 false，面板再也打不开。
+                if open.get() != e.open {
+                    open.set(e.open);
+                }
+                if e.open {
+                    OPENS.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    // 放弃粘贴（Esc / 失焦）也要把前台还给原来的应用。
+                    run_on_main_thread(|| {
+                        clipboard::return_to_previous_app();
+                    });
+                }
+                logs::line(format!(
                     "PANEL open={} reason={:?} front={:?}",
                     e.open,
                     e.reason,
-                    frontmost()
+                    clipboard::frontmost()
                 ));
             })
             .content(move || {
@@ -114,275 +148,134 @@ pub fn App() -> impl IntoElement {
                         *slot.borrow_mut() = Some(me.clone());
                     }
                 });
-                on_key("x", |_| log_line("PANEL key x received".to_owned()));
-                view()
-                    .flex_1()
-                    .p_4()
-                    .gap_2()
-                    .bg(move || theme().background)
-                    .child(text("clipnest panel").text_size(px(15.0)))
-                    .child(
-                        text(move || format!("items: {}", count()))
-                            .text_size(px(12.0))
-                            .text_color(move || theme().muted_foreground),
-                    )
-                    .child(text(move || lines.get()).text_size(px(11.0)))
+                panel::panel()
             }),
     )
 }
 
-// ───────────────────────── 观测与剪贴板 ─────────────────────────
-
-fn items() -> &'static Arc<Mutex<Vec<String>>> {
-    static ITEMS: OnceLock<Arc<Mutex<Vec<String>>>> = OnceLock::new();
-    ITEMS.get_or_init(|| Arc::new(Mutex::new(Vec::new())))
-}
-
-fn count() -> usize {
-    items().lock().map(|v| v.len()).unwrap_or(0)
-}
-
-fn log_line(line: String) {
-    use std::io::Write;
-    log::info!("{line}");
-    if let Ok(mut f) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open("/tmp/clipnest.log")
-    {
-        let _ = writeln!(f, "{line}");
-    }
-    if let Ok(mut v) = items().lock() {
-        v.push(line);
-    }
-}
-
-/// 辅助功能授权状态（自动粘贴 CGEvent 的前置条件）。
-#[cfg(target_os = "macos")]
-fn ax_trusted() -> bool {
-    #[link(name = "ApplicationServices", kind = "framework")]
-    unsafe extern "C" {
-        fn AXIsProcessTrusted() -> bool;
-    }
-    unsafe { AXIsProcessTrusted() }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn ax_trusted() -> bool {
-    false
-}
-
-/// 当前前台应用的本地化名字（用于判断面板是否抢了焦点）。
-fn frontmost() -> String {
-    let out = std::process::Command::new("sh")
-        .arg("-c")
-        .arg("lsappinfo info -only name $(lsappinfo front) 2>/dev/null | head -1")
-        .output();
-    match out {
-        Ok(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
-        Err(e) => format!("<err {e}>"),
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn change_count() -> i64 {
-    use objc2_app_kit::NSPasteboard;
-    NSPasteboard::generalPasteboard().changeCount() as i64
-}
-
-#[cfg(not(target_os = "macos"))]
-fn change_count() -> i64 {
-    0
-}
-
-/// 一次采集的结果。
-struct Snapshot {
-    /// flavor 名单，如 `text+html`。
-    flavors: String,
-    /// 摘要（日志与面板用，已压平换行）。
-    excerpt: String,
-    /// 要入库的纯文本。
-    text: Option<String>,
-    /// 要入库的文件路径。
-    files: Vec<String>,
-}
-
-/// 读一次剪贴板。
-fn capture_once() -> Option<Snapshot> {
-    use clipboard_rs::{Clipboard, ClipboardContext, ContentFormat};
-
-    let ctx = ClipboardContext::new().ok()?;
-    let mut flavors: Vec<&str> = Vec::new();
-    let mut excerpt = String::new();
-    let mut text = None;
-    let mut files = Vec::new();
-
-    if ctx.has(ContentFormat::Files) {
-        flavors.push("files");
-        if let Ok(list) = ctx.get_files() {
-            excerpt = list.join("|");
-            files = list;
-        }
-    }
-    if ctx.has(ContentFormat::Image) {
-        flavors.push("image");
-    }
-    if ctx.has(ContentFormat::Html) {
-        flavors.push("html");
-        if excerpt.is_empty()
-            && let Ok(html) = ctx.get_html()
-        {
-            excerpt = html;
-        }
-    }
-    if ctx.has(ContentFormat::Rtf) {
-        flavors.push("rtf");
-        if excerpt.is_empty()
-            && let Ok(rtf) = ctx.get_rich_text()
-        {
-            excerpt = rtf;
-        }
-    }
-    if ctx.has(ContentFormat::Text) {
-        flavors.push("text");
-        if let Ok(t) = ctx.get_text() {
-            if excerpt.is_empty() {
-                excerpt = t.clone();
-            }
-            if !t.is_empty() {
-                text = Some(t);
-            }
-        }
-    }
-
-    if flavors.is_empty() {
-        return None;
-    }
-    let excerpt: String = excerpt.chars().take(60).collect();
-    Some(Snapshot {
-        flavors: flavors.join("+"),
-        excerpt: excerpt.replace('\n', "\\n"),
-        text,
-        files,
-    })
-}
-
-/// 把一次采集落库；结果写日志（`DB INSERTED/DEDUPED id=…`）。
-fn store_capture(snap: &Snapshot) {
-    let captured = store::Captured {
-        text: snap.text.clone(),
-        files: snap.files.clone(),
-    };
-    if captured.is_empty() {
-        log_line("DB SKIP 无可入库内容".to_owned());
+/// 窗口在 commit 之后才创建，focus 偶尔会落空（P0 坑 6）：
+/// 每 80 ms 重试，直到窗口真的能接键盘。
+fn focus_when_ready(attempt: u32) {
+    if attempt > 10 {
         return;
     }
-    let Some(db) = store::db() else {
-        log_line("DB UNAVAILABLE 跳过入库".to_owned());
-        return;
-    };
-    let Ok(conn) = db.lock() else {
-        log_line("DB LOCK ERROR 跳过入库".to_owned());
-        return;
-    };
-    match store::record(&conn, &captured) {
-        Ok(stored) => {
-            for s in stored {
-                log_line(format!("DB {} kind={}", s.label(), s.kind.as_str()));
-            }
-        }
-        Err(e) => log_line(format!("DB ERROR {e}")),
-    }
+    set_timeout(
+        Duration::from_millis(if attempt == 0 { 120 } else { 80 }),
+        move || {
+            // 关键：`focus()` 必须从主线程发出。`set_timeout` 的回调可能在
+            // 别的线程跑（实测 `MainThreadMarker::new()` 为 None），从非主线程
+            // 调 AppKit 的 makeKeyAndOrderFront 是空操作——面板收不到键盘。
+            let answer = run_on_main_thread(move || {
+                PANEL.with(|slot| {
+                    if let Some(panel) = slot.borrow().as_ref() {
+                        panel.focus();
+                    }
+                });
+                let state = clipboard::key_window_state();
+                logs::line(format!("PANEL focus try={attempt} {state}"));
+                // 成了就停：面板成为 key window 后才能收键盘。
+                state.starts_with("key=Some(")
+            });
+            spawn(async move {
+                let focused = answer.await.unwrap_or(false);
+                if !focused {
+                    focus_when_ready(attempt + 1);
+                }
+            });
+        },
+    );
 }
 
-/// 发送 ⌘V（用 core-graphics 的 CGEvent，进程内实现）。
-#[cfg(target_os = "macos")]
-fn post_cmd_v() -> bool {
-    use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation, CGKeyCode};
-    use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
-
-    const KEY_V: CGKeyCode = 9;
-    let Ok(source) = CGEventSource::new(CGEventSourceStateID::HIDSystemState) else {
-        return false;
-    };
-    let Ok(down) = CGEvent::new_keyboard_event(source.clone(), KEY_V, true) else {
-        return false;
-    };
-    down.set_flags(CGEventFlags::CGEventFlagCommand);
-    down.post(CGEventTapLocation::HID);
-    std::thread::sleep(Duration::from_millis(40));
-    let Ok(up) = CGEvent::new_keyboard_event(source, KEY_V, false) else {
-        return false;
-    };
-    up.set_flags(CGEventFlags::CGEventFlagCommand);
-    up.post(CGEventTapLocation::HID);
-    true
-}
-
-#[cfg(not(target_os = "macos"))]
-fn post_cmd_v() -> bool {
-    false
-}
-
-/// 自身写回后登记的 changeCount：watcher 见到它即跳过。
-static OWN_WRITE: AtomicI64 = AtomicI64::new(-1);
+// ───────────────────────── 采集 ─────────────────────────
 
 fn start_watcher() {
     std::thread::spawn(|| {
-        let mut last = change_count();
-        log_line(format!("WATCH start changeCount={last}"));
+        let mut last = clipboard::change_count();
+        logs::line(format!("WATCH start changeCount={last}"));
         loop {
             std::thread::sleep(Duration::from_millis(120));
-            let now = change_count();
+            let now = clipboard::change_count();
             if now == last {
                 continue;
             }
             last = now;
 
-            if OWN_WRITE.load(Ordering::SeqCst) == now {
-                log_line(format!("SKIP self-write changeCount={now}"));
+            if clipboard::is_self_write(now) {
+                logs::line(format!("SKIP self-write changeCount={now}"));
                 continue;
             }
 
-            match capture_once() {
+            match clipboard::capture() {
                 Some(snap) => {
-                    log_line(format!(
+                    logs::line(format!(
                         "CAPTURE cc={now} flavors={} :: {}",
                         snap.flavors, snap.excerpt
                     ));
                     store_capture(&snap);
-                    let excerpt = snap.excerpt.clone();
-                    if std::env::var("SPIKE_WRITEBACK").is_ok() {
-                        use clipboard_rs::{Clipboard, ClipboardContext};
-                        if let Ok(ctx) = ClipboardContext::new() {
-                            if ctx.set_text(excerpt.clone()).is_ok() {
-                                let after = change_count();
-                                OWN_WRITE.store(after, Ordering::SeqCst);
-                                log_line(format!("WRITEBACK cc={after} expect SKIP next"));
-                                if std::env::var("SPIKE_AUTOPASTE").is_ok() {
-                                    std::thread::sleep(Duration::from_millis(120));
-                                    let ok = post_cmd_v();
-                                    log_line(format!("AUTOPASTE cmd+v posted ok={ok}"));
-                                }
-                            }
-                        }
-                    }
+                    spike_writeback(&snap);
                 }
-                None => log_line(format!("CAPTURE cc={now} flavors=<none>")),
+                None => logs::line(format!("CAPTURE cc={now} flavors=<none>")),
             }
         }
     });
+}
+
+/// 把一次采集落库；结果写日志（`DB INSERTED/DEDUPED id=…`）。
+fn store_capture(snap: &clipboard::Snapshot) {
+    let captured = store::Captured {
+        text: snap.text.clone(),
+        files: snap.files.clone(),
+    };
+    if captured.is_empty() {
+        logs::line("DB SKIP 无可入库内容");
+        return;
+    }
+    let Some(db) = store::db() else {
+        logs::line("DB UNAVAILABLE 跳过入库");
+        return;
+    };
+    let Ok(conn) = db.lock() else {
+        logs::line("DB LOCK ERROR 跳过入库");
+        return;
+    };
+    match store::record(&conn, &captured) {
+        Ok(stored) => {
+            for s in stored {
+                logs::line(format!("DB {} kind={}", s.label(), s.kind.as_str()));
+            }
+        }
+        Err(e) => logs::line(format!("DB ERROR {e}")),
+    }
+}
+
+/// P0 留下的自检开关：`SPIKE_WRITEBACK=1` 时把采集到的内容写回剪贴板，
+/// 验证回环抑制；再给 `SPIKE_AUTOPASTE=1` 就连 ⌘V 一起验。
+fn spike_writeback(snap: &clipboard::Snapshot) {
+    if std::env::var("SPIKE_WRITEBACK").is_err() {
+        return;
+    }
+    use clipboard_rs::{Clipboard, ClipboardContext};
+    let Ok(ctx) = ClipboardContext::new() else {
+        return;
+    };
+    if ctx.set_text(snap.excerpt.clone()).is_ok() {
+        let after = clipboard::mark_self_write();
+        logs::line(format!("WRITEBACK cc={after} expect SKIP next"));
+        if std::env::var("SPIKE_AUTOPASTE").is_ok() {
+            clipboard::paste_after_write_back();
+        }
+    }
 }
 
 /// 让 main 启动 watcher（幂等）。
 pub fn boot() {
     static ONCE: OnceLock<()> = OnceLock::new();
     ONCE.get_or_init(|| {
-        log_line(format!(
+        logs::line(format!(
             "BOOT pid={} front={} axTrusted={} db={} items={:?}",
             std::process::id(),
-            frontmost(),
-            ax_trusted(),
+            clipboard::frontmost(),
+            clipboard::ax_trusted(),
             store::db_path().display(),
             store::count()
         ));
