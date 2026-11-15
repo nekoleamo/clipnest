@@ -133,8 +133,8 @@ pub fn paste_after_write_back() {
     });
 }
 
-/// 面板出现前的前台应用 pid（粘贴时切回去）。
-static PREV_PID: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+/// 面板出现前的前台目标（macOS 存 pid，Windows 存 HWND；0 = 还没记过）。
+static PREV_TARGET: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 
 /// 记下当前前台应用（主线程调用：面板还没抢走焦点时）。
 #[cfg(target_os = "macos")]
@@ -148,25 +148,47 @@ pub fn remember_front_app() {
     if let Some(app) = ws.frontmostApplication() {
         let pid = app.processIdentifier();
         if pid != std::process::id() as i32 {
-            PREV_PID.store(pid, Ordering::SeqCst);
+            PREV_TARGET.store(pid as i64, Ordering::SeqCst);
             crate::logs::line(format!("FRONT remember pid={pid}"));
         }
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows：记下前台窗口句柄（粘贴时用它 SetForegroundWindow）。
+#[cfg(target_os = "windows")]
+pub fn remember_front_app() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowThreadProcessId,
+    };
+    // SAFETY: 只读系统状态。
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() {
+            return;
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid == std::process::id() {
+            return;
+        }
+        PREV_TARGET.store(hwnd as i64, Ordering::SeqCst);
+        crate::logs::line(format!("FRONT remember hwnd={} pid={pid}", hwnd as i64));
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn remember_front_app() {}
 
-/// 记下的前台应用 pid（0 = 还没记过）。
-pub fn front_pid() -> i32 {
-    PREV_PID.load(Ordering::SeqCst)
+/// 记下的前台目标（macOS: pid；Windows: HWND；0 = 还没记过）。
+pub fn front_target() -> i64 {
+    PREV_TARGET.load(Ordering::SeqCst)
 }
 
 /// 切回面板出现前的应用；粘贴的 ⌘V 要发给它。
 #[cfg(target_os = "macos")]
 pub fn return_to_previous_app() -> bool {
     use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication};
-    let pid = front_pid();
+    let pid = front_target() as i32;
     if pid <= 0 || pid == std::process::id() as i32 {
         return false;
     }
@@ -181,7 +203,28 @@ pub fn return_to_previous_app() -> bool {
     ok
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows：把前台还给刚才那个窗口；被前台锁拒绝时返回 false。
+#[cfg(target_os = "windows")]
+pub fn return_to_previous_app() -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{IsWindow, SetForegroundWindow};
+    let raw = front_target();
+    if raw == 0 {
+        return false;
+    }
+    let hwnd = raw as windows_sys::Win32::Foundation::HWND;
+    // SAFETY: 句柄来自 GetForegroundWindow，IsWindow 先确认它还活着。
+    unsafe {
+        if IsWindow(hwnd) == 0 {
+            crate::logs::line(format!("FRONT gone hwnd={raw}"));
+            return false;
+        }
+        let ok = SetForegroundWindow(hwnd) != 0;
+        crate::logs::line(format!("FRONT activate hwnd={raw} ok={ok}"));
+        ok
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn return_to_previous_app() -> bool {
     false
 }
@@ -204,19 +247,45 @@ pub fn key_window_state() -> String {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows：前台窗口是不是自己（等价于 macOS 的 key window 判断）。
+#[cfg(target_os = "windows")]
+pub fn key_window_state() -> String {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetForegroundWindow, GetWindowThreadProcessId,
+    };
+    // SAFETY: 只读系统状态。
+    unsafe {
+        let hwnd = GetForegroundWindow();
+        if hwnd.is_null() {
+            return "key=None active=false".to_owned();
+        }
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        let mine = pid == std::process::id();
+        format!("key=Some(hwnd={}) active={mine}", hwnd as i64)
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn key_window_state() -> String {
     "<n/a>".to_owned()
 }
 
-/// 当前剪贴板 changeCount（非 macOS 先给 0，Windows 后端 P5 再实现）。
+/// 当前剪贴板版本号（macOS 是 `changeCount`，Windows 是剪贴板序列号）。
 #[cfg(target_os = "macos")]
 pub fn change_count() -> i64 {
     use objc2_app_kit::NSPasteboard;
     NSPasteboard::generalPasteboard().changeCount() as i64
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+pub fn change_count() -> i64 {
+    use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
+    // SAFETY: 无参数、只读。
+    unsafe { GetClipboardSequenceNumber() as i64 }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn change_count() -> i64 {
     0
 }
@@ -231,7 +300,13 @@ pub fn ax_trusted() -> bool {
     unsafe { AXIsProcessTrusted() }
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows 没有辅助功能授权这道门槛（UIPI 的例外在粘贴失败时再处理）。
+#[cfg(target_os = "windows")]
+pub fn ax_trusted() -> bool {
+    true
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn ax_trusted() -> bool {
     false
 }
@@ -260,7 +335,47 @@ fn post_cmd_v() -> bool {
     true
 }
 
-#[cfg(not(target_os = "macos"))]
+/// 发送 Ctrl+V（四个 INPUT：Ctrl 按下、V 按下、V 抬起、Ctrl 抬起）。
+#[cfg(target_os = "windows")]
+fn post_cmd_v() -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, SendInput,
+        VIRTUAL_KEY, VK_CONTROL, VK_V,
+    };
+
+    fn key(vk: VIRTUAL_KEY, flags: KEYBD_EVENT_FLAGS) -> INPUT {
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: vk,
+                    wScan: 0,
+                    dwFlags: flags,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        }
+    }
+
+    let inputs = [
+        key(VK_CONTROL, 0),
+        key(VK_V, 0),
+        key(VK_V, KEYEVENTF_KEYUP),
+        key(VK_CONTROL, KEYEVENTF_KEYUP),
+    ];
+    // SAFETY: 数组与长度一致，结构体全部零初始化后再填。
+    let sent = unsafe {
+        SendInput(
+            inputs.len() as u32,
+            inputs.as_ptr(),
+            std::mem::size_of::<INPUT>() as i32,
+        )
+    };
+    sent == inputs.len() as u32
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn post_cmd_v() -> bool {
     false
 }

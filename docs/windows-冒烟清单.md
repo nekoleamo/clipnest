@@ -23,21 +23,26 @@
 >
 > 交叉编译**无法**验证的（必须真机）：窗口是否抢焦、Popup 层级、`RegisterHotKey` 是否触发、剪贴板事件、`SendInput` 粘贴、托盘图标、多显示器定位。
 
-## 0. 必须先补的代码（当前只有 macOS 分支）
+## 0. Windows 后端（已补齐，2026-11-15）
+
+> 已在 macOS 上交叉编译并打包通过（见 `2026-11-15-nsh-验证记录.md` 第十二节）。
+> 产物：`.nsh/out/clipnest.zip`（20.4 MB，含 `clipnest.exe` 52.4 MB）。
+
+`src/clipboard.rs` 的 Windows 分支已经实现：
 
 `src/clipboard.rs` 里这些函数目前只有 macOS 实现，Windows 分支要么是空壳要么返回假值：
 
-| 函数 | 现状 | Windows 要换成 |
+| 函数 | macOS | Windows（已实现） |
 | --- | --- | --- |
-| `change_count()` | 返回 0（watcher 永远不触发） | `GetClipboardSequenceNumber()`（user32） |
-| `post_cmd_v()` | 返回 false | `SendInput` 发 Ctrl+V（两个 KEYEVENTF 事件） |
-| `ax_trusted()` | false | Windows 无此概念，返回 true |
-| `remember_front_app()` / `return_to_previous_app()` | 空实现 | `GetForegroundWindow()` + `SetForegroundWindow()` |
-| `key_window_state()` | `"<n/a>"` | 可留空（只是诊断） |
+| `change_count()` | `NSPasteboard.changeCount` | `GetClipboardSequenceNumber()` |
+| `post_cmd_v()` | CGEvent ⌘V | `SendInput` 发 Ctrl+V（Ctrl↓ V↓ V↑ Ctrl↑） |
+| `ax_trusted()` | `AXIsProcessTrusted` | 恒 true |
+| `remember_front_app()` / `return_to_previous_app()` | `NSWorkspace` / `NSRunningApplication` | `GetForegroundWindow()` + `SetForegroundWindow()` |
+| `key_window_state()` | `NSApp.keyWindow` | 前台窗口是否是自己 |
 
-依赖：`[target.'cfg(windows)'.dependencies] windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_UI_Input_KeyboardAndMouse", "Win32_System_DataExchange", "Win32_System_Memory"] }`
+依赖：`windows-sys 0.61.2`（`Win32_Foundation`、`Win32_UI_WindowsAndMessaging`、`Win32_UI_Input_KeyboardAndMouse`、`Win32_System_DataExchange`、`Win32_System_Threading`）。
 
-补完先在本机跑 `cargo check`（Windows 上），再进下面的冒烟。
+macOS 上的交叉验证：`cargo xwin check --target x86_64-pc-windows-msvc --all-targets`。
 
 ## 1. 打包与启动
 

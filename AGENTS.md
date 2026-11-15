@@ -11,10 +11,14 @@
 ## 构建
 
 ```bash
-source "$HOME/.cargo/env"   # rustup；brew rust 与假 cargo shim 均已移除
+source "$HOME/.cargo/env"   # rustup（cargo 在 ~/.cargo/bin；/opt/homebrew/bin/cargo 已不存在）
 cargo check
 nsh package --target macos
 nsh test
+
+# Windows：交叉编译与打包（macOS 上可跑，真机冒烟另算）
+cargo xwin check --target x86_64-pc-windows-msvc --all-targets
+nsh package --target windows
 ```
 
 ## nsh 0.5.1 已确认的坑（每条都实测过）
