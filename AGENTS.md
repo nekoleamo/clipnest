@@ -72,7 +72,9 @@ nsh package --target windows
 2. **打包版 runner 里 `boot()` 不在主线程**：`MainThreadMarker::new()` 返回 `None`，`NSScreen`/`NSEvent` 都用不了。要屏幕信息就用 CoreGraphics（`CGDisplay::main().bounds()`，任意线程）。
 3. **`image().object_fit(ResizeMode::Contain)` 实测不生效**（按 Cover 裁切）：自己按 `width/height` 算显示尺寸。
 4. 文字别用 `muted_foreground`（暗色 9pt 下读不清），统一 `foreground`，层级靠字号。
-5. **预览放左右分栏，别放列表上方**：放上面会把内容整体往下挤（用户实测反馈）。面板宽度 (720) 与高度 (560) 都是窗口创建时定死的，改布局只能动内部 flex。
+5. **`dynamic` 包固定尺寸元素会整块不绘制**：`dynamic(move || view().w(..).h(..).bg(..))` 实测连背景都画不出来（窗口透出下层）。要「按状态换内容」就用**容器常驻 + 属性闭包**（`image(move || src).w(move || px(..))`）。
+6. 拖窗口用 `.window_drag(true)`（AppKit `performWindowDragWithEvent:` / Win32 `HTCAPTION`），放在根视图上不影响输入框与行的点击。
+7. **预览放左右分栏，别放列表上方**：放上面会把内容整体往下挤（用户实测反馈）。面板宽度 (720) 与高度 (560) 都是窗口创建时定死的，改布局只能动内部 flex。
 
 ## 状态与自检（P6 实测）
 

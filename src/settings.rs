@@ -41,7 +41,7 @@ impl Default for Settings {
         Self {
             max_items: 5000,
             panel_height: 560,
-            panel_position: "bottom".to_owned(),
+            panel_position: "center".to_owned(),
             sensitive_apps: Vec::new(),
             ignore_sensitive_apps: true,
             export_dir: String::new(),
@@ -54,7 +54,7 @@ impl Settings {
     pub fn normalized(mut self) -> Self {
         self.max_items = self.max_items.clamp(0, 1_000_000);
         if self.panel_position != "center" && self.panel_position != "bottom" {
-            self.panel_position = "bottom".to_owned();
+            self.panel_position = "center".to_owned();
         }
         self.panel_height = self.panel_height.clamp(PANEL_HEIGHT_MIN, PANEL_HEIGHT_MAX);
         self

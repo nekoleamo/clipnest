@@ -39,14 +39,15 @@ pub fn panel_origin(width: f32, height: f32, position: Position) -> Option<(f32,
     use core_graphics::display::CGDisplay;
 
     let b = CGDisplay::main().bounds();
-    // 底部定位给 Dock 让位（CGDisplayBounds 是整屏，不扣 Dock）。
-    let h = match position {
-        Position::Bottom => (b.size.height - 90.0).max(0.0),
-        Position::Center => b.size.height,
-    };
+    // `CGDisplayBounds` 是整屏（含菜单栏与 Dock）。两种位置都按「可见区」算，
+    // 否则居中会视觉偏下（下方被 Dock 占掉一截）。
+    const MENU_BAR: f64 = 25.0;
+    const DOCK: f64 = 90.0;
+    let top = b.origin.y + MENU_BAR;
+    let h = (b.size.height - MENU_BAR - DOCK).max(0.0);
     Some(place(
         b.origin.x,
-        b.origin.y,
+        top,
         b.size.width,
         h,
         width,

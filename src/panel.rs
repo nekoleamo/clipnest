@@ -565,6 +565,8 @@ pub fn Panel() -> impl IntoElement {
         .gap_2()
         .p_2()
         .bg(move || theme().background)
+        // 按住空白处即可拖窗口（AppKit 原生 performWindowDrag；输入框与行内的按压仍然有效）
+        .window_drag(true)
         .child(ax_banner())
         .child(field)
         .child(
@@ -606,7 +608,7 @@ pub fn Panel() -> impl IntoElement {
                                 .child(empty_hint(rows_view)),
                         ),
                 )
-                .child(dynamic(move || preview(rows_pv, sel_pv))),
+                .child(preview(rows_pv, sel_pv)),
         )
         .child(
             text(move || {
@@ -733,40 +735,47 @@ fn ax_banner() -> View {
 }
 
 /// 选中图片时的大图预览（占列表上方一块，等比缩放不裁切）。
-fn preview(rows: Signal<Vec<Row>>, sel: Signal<usize>) -> AnyElement {
+fn preview(rows: Signal<Vec<Row>>, sel: Signal<usize>) -> View {
     const BOX_W: f32 = 280.0;
-    const BOX_H: f32 = 400.0;
+    const BOX_H: f32 = 456.0;
 
-    let picked = rows.with(|r| r.get(sel.get()).cloned());
-    let Some(row) = picked else {
-        return view().w(px(0.0)).into_element();
-    };
-    let Some(path) = row.origin.clone() else {
-        return view().w(px(0.0)).into_element();
-    };
-
-    // 自己算等比尺寸：`image().object_fit(Contain)` 实测没生效（按 Cover 裁切了）。
-    let (iw, ih) = (
-        row.width.unwrap_or(0) as f32,
-        row.height.unwrap_or(0) as f32,
-    );
-    let (dw, dh) = if iw > 1.0 && ih > 1.0 {
-        let scale = (BOX_W / iw).min(BOX_H / ih).min(1.0);
-        (iw * scale, ih * scale)
-    } else {
-        (BOX_W, BOX_H)
+    // 容器常驻，只有 src 与尺寸是响应式的：`dynamic` 包固定尺寸元素时整块不绘制（实测），
+    // 而在渲染体里直接读 signal 又不会随选中变化重算。
+    let dims = move || -> (String, f32, f32) {
+        rows.with(|r| {
+            let Some(row) = r.get(sel.get()) else {
+                return (String::new(), 0.0, 0.0);
+            };
+            let Some(path) = row.origin.clone() else {
+                return (String::new(), 0.0, 0.0);
+            };
+            let (iw, ih) = (
+                row.width.unwrap_or(0) as f32,
+                row.height.unwrap_or(0) as f32,
+            );
+            if iw > 1.0 && ih > 1.0 {
+                let scale = (BOX_W / iw).min(BOX_H / ih).min(1.0);
+                (path, iw * scale, ih * scale)
+            } else {
+                (path, BOX_W, BOX_H)
+            }
+        })
     };
 
     view()
         .w(px(BOX_W))
-        // 不定高：flex_row 里默认 stretch，纵向跟着列表一样高
+        .h(px(BOX_H))
+        .rounded_md()
+        .bg(move || theme().muted)
         .flex()
         .items_center()
         .justify_center()
-        .rounded_md()
-        .bg(move || theme().muted)
-        .child(image(path).w(px(dw)).h(px(dh)).rounded_md())
-        .into_element()
+        .child(
+            image(move || dims().0)
+                .w(move || px(dims().1))
+                .h(move || px(dims().2))
+                .rounded_md(),
+        )
 }
 
 /// 图片条目的缩略图（40pt 方形，没有就占位不画）。
