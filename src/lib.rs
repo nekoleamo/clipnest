@@ -307,9 +307,41 @@ pub fn App() -> impl IntoElement {
         });
     });
 
-    // 自检：SPIKE_PREFS=1 时启动 3 秒后打开设置窗（托盘菜单不好自动化）。
+    // 自检：SPIKE_BACKUP=export|import 直接跑一次加密备份的导出/导入（口令固定 test123）。
+    if let Ok(mode) = std::env::var("SPIKE_BACKUP") {
+        set_timeout(Duration::from_secs(3), move || {
+            let Some(db) = store::db() else {
+                logs::line("BACKUP SPIKE no db");
+                return;
+            };
+            let Ok(conn) = db.lock() else {
+                return;
+            };
+            let result = if mode == "import" {
+                match backup::backups(paths()).into_iter().next() {
+                    Some(latest) => backup::import(&conn, &latest, "test123").map(|r| {
+                        format!(
+                            "imported inserted={} skipped={} groups={}",
+                            r.inserted, r.skipped, r.groups_inserted
+                        )
+                    }),
+                    None => Err(backup::Error::Format("backups/ 里没有 .cnbak".to_owned())),
+                }
+            } else {
+                backup::export_to(&conn, paths(), "test123")
+                    .map(|p| format!("exported {}", p.display()))
+            };
+            match result {
+                Ok(msg) => logs::line(format!("BACKUP SPIKE {msg}")),
+                Err(e) => logs::line(format!("BACKUP SPIKE ERROR {e}")),
+            }
+        });
+    }
+
+    // 自检：SPIKE_PREFS=1 时启动 3 秒后打开设置窗。
+    // 必须放在组件的渲染体里：`boot()` 里没有响应式运行时，`Signal::set` 不会触发重渲染。
     if std::env::var("SPIKE_PREFS").is_ok() {
-        set_timeout(Duration::from_secs(3), open_prefs);
+        set_timeout(Duration::from_secs(3), move || prefs_open.set(true));
     }
 
     // 自动弹出的自检：SPIKE_AUTOOPEN=1 时启动 4 秒后打开面板，用于测焦点。

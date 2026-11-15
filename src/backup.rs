@@ -111,6 +111,35 @@ pub fn export(conn: &Connection, path: &Path, passphrase: &str) -> Result<()> {
     Ok(())
 }
 
+/// 备份文件名：`clipnest-<YYYYmmdd-HHMMSS>.cnbak`（放进 `backups/`）。
+pub fn default_name() -> String {
+    format!(
+        "clipnest-{}.cnbak",
+        chrono::Local::now().format("%Y%m%d-%H%M%S")
+    )
+}
+
+/// 导出到数据目录的 `backups/` 下，返回落盘路径（设置窗用）。
+pub fn export_to(conn: &Connection, paths: &crate::paths::Paths, passphrase: &str) -> Result<std::path::PathBuf> {
+    let path = paths.backup(&default_name());
+    export(conn, &path, passphrase)?;
+    Ok(path)
+}
+
+/// 列出已有备份，新的在前（文件名带时间戳，倒序即可）。
+pub fn backups(paths: &crate::paths::Paths) -> Vec<std::path::PathBuf> {
+    let Ok(dir) = std::fs::read_dir(paths.backups_dir()) else {
+        return Vec::new();
+    };
+    let mut out: Vec<_> = dir
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "cnbak"))
+        .collect();
+    out.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    out
+}
+
 /// 导出并返回容器字节（测试与同步载荷复用）。
 pub fn export_bytes(conn: &Connection, passphrase: &str) -> Result<Vec<u8>> {
     let payload = collect(conn)?;

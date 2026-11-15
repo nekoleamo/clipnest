@@ -258,6 +258,7 @@ pub fn Prefs() -> impl IntoElement {
                 )
                 .child(hint("Esc 收起；↑↓ 选择；⏎ 粘贴")),
         )
+        .child(backup_section())
         .child(
             row()
                 .child(label("更新"))
@@ -604,4 +605,126 @@ fn sync_section() -> View {
         .child(hint_dyn(
             "配置在数据目录的 sync.json（可单独备份/分享模板）；密码与同步口令在系统钥匙串里".to_owned(),
         ))
+}
+
+// ───────────────────────── 备份 ─────────────────────────
+
+/// 加密备份：导出到 `backups/`，或导入最新的一份。
+///
+/// 口令只在本窗口里用一次，不落盘（同步口令另有钥匙串条目，两者独立）。
+fn backup_section() -> View {
+    // 导出/导入都在 UI 线程同步做完（几十毫秒到几百毫秒），不需要轮询状态。
+    let note = signal(String::new());
+
+    let phrase = signal(String::new());
+    let phrase_for_export = phrase;
+    let note_export = note;
+    let export_btn = button("导出备份").on_press(move |_: &()| {
+        let passphrase = phrase_for_export.get();
+        if passphrase.is_empty() {
+            note_export.set("先填一个备份口令".to_owned());
+            return;
+        }
+        let Some(db) = store::db() else {
+            note_export.set("数据库打不开".to_owned());
+            return;
+        };
+        let Ok(conn) = db.lock() else {
+            note_export.set("数据库被占用".to_owned());
+            return;
+        };
+        match crate::backup::export_to(&conn, crate::paths(), &passphrase) {
+            Ok(path) => {
+                let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                logs::line(format!("BACKUP export {name}"));
+                note_export.set(format!("已导出 {name}（在 backups/ 里）"));
+            }
+            Err(e) => note_export.set(format!("导出失败：{e}")),
+        }
+    });
+
+    let note_import = note;
+    let phrase_for_import = phrase;
+    let import_btn = button("导入最新").on_press(move |_: &()| {
+        let passphrase = phrase_for_import.get();
+        if passphrase.is_empty() {
+            note_import.set("先填备份口令".to_owned());
+            return;
+        }
+        let Some(latest) = crate::backup::backups(crate::paths()).into_iter().next() else {
+            note_import.set("backups/ 里没有 .cnbak 文件".to_owned());
+            return;
+        };
+        let Some(db) = store::db() else {
+            note_import.set("数据库打不开".to_owned());
+            return;
+        };
+        let Ok(conn) = db.lock() else {
+            note_import.set("数据库被占用".to_owned());
+            return;
+        };
+        match crate::backup::import(&conn, &latest, &passphrase) {
+            Ok(report) => {
+                logs::line(format!(
+                    "BACKUP import inserted={} skipped={} groups={}",
+                    report.inserted, report.skipped, report.groups_inserted
+                ));
+                note_import.set(format!(
+                    "已导入：新增 {} 条、跳过 {} 条、分组 {}",
+                    report.inserted, report.skipped, report.groups_inserted
+                ));
+            }
+            Err(e) => note_import.set(format!("导入失败：{e}")),
+        }
+    });
+
+    let note_reveal = note;
+    let open_dir = button("打开 backups/").on_press(move |_: &()| {
+        let _ = std::fs::create_dir_all(crate::paths().backups_dir());
+        // 结果不重要：系统要么打开访达，要么不响应。
+        drop(reveal_path(crate::paths().backups_dir()));
+        note_reveal.set("已在访达中打开；把 .cnbak 拖进来再点「导入最新」".to_owned());
+    });
+
+    let count = crate::backup::backups(crate::paths()).len();
+
+    view()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .pt_3()
+        .child(
+            text("备份")
+                .text_size(px(13.0))
+                .text_color(move || theme().foreground),
+        )
+        .child(
+            row()
+                .child(label("备份口令"))
+                .child(
+                    input()
+                        .value(move || phrase.get())
+                        .masked(true)
+                        .text_size(px(11.0))
+                        .px_2()
+                        .py_1()
+                        .rounded_md()
+                        .bg(move || theme().muted)
+                        .on_change(move |text: &str| phrase.set(text.to_owned())),
+                )
+                .child(hint_dyn(format!(
+                    "仅本次使用，不保存；已有 {count} 个备份"
+                ))),
+        )
+        .child(
+            row()
+                .child(export_btn)
+                .child(import_btn)
+                .child(open_dir)
+                .child(
+                    text(move || note.get())
+                        .text_size(px(10.0))
+                        .text_color(move || theme().muted_foreground),
+                ),
+        )
 }

@@ -66,6 +66,12 @@ nsh package --target windows
 2. **写剪贴板文件后前台会被抢回原应用**：面板还在但收不到键盘 → 导出成功后补一次 `focus_panel()`。
 3. **小图别让 `image` 重编码当缩略图**：128×128 的图 AppKit 编码 3.8K、`image` 重编码 39K（比原图还大）。只在最长边 > 320 时才真缩，否则拷原图字节。
 
+## 状态与自检（P6 实测）
+
+1. **`Signal::set` 必须在组件的渲染体 / effect 里**：`boot()`（`run_app` 之前的纯函数）里 set 不报错但不触发重渲染（自检窗口因此在日志里「打开了」却从未出现）。跨线程改状态用「写 static → UI 里 `set_interval` 轮询」。
+2. 界面上的长任务（同步/更新）一律后台线程 + static 状态文字；备份这种几十毫秒的可以同步做。
+3. 备份口令（每次手输）与同步口令（钥匙串）是两个东西，别混。
+
 ## 发布（P6）
 
 1. **签名免费、公证付费**：ad-hoc/自签都能签，但 Gatekeeper 不认；`Developer ID` 证书与 `notarytool` 必须 Apple Developer Program（$99/年）。
