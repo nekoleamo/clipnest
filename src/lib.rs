@@ -13,6 +13,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
+pub mod db;
+pub mod model;
+
 use nsh_base::theme;
 use nsh_core::desktop::{WindowAttributes, WindowKind};
 use nsh_core::element::desktop::{WindowRef, current_window, register_global_shortcut, window};
