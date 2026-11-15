@@ -1,159 +1,64 @@
 # clipnest 项目约定
 
 > 新会话先读：`docs/路线图.md`（总纲）→ `docs/执行计划-下一步.md`（从哪继续）→ 本文（约定与坑）。
+> `legacy-rust/` 是**已归档**的 nsh + Rust 实现（含全部 nsh 实测坑，见 `legacy-rust/AGENTS-历史坑.md`），只作逐行对照，不再改动、不再构建。
 
 ## 技术栈（不要偏离）
 
-- **Rust + nsh 0.5.1**，UI 用 Rust 组件（`nsh_core` / `nsh_base`），不用 TSX
-- 不引入 WebView、Node、Electron 类依赖
-- `nsh` 版本锁在 0.5.1，升级单独做一次并复跑 `docs/` 里的验证项
+- **Go 1.27+**，模块名 `clipnest`，纯 Go **无 cgo**
+- **mygo v0.9.1**（锁定，升级单独一轮并复跑 `docs/` 验证项）
+- UI 走 **mygo `ui` 包纯 Go 自绘**：不用 WebView、不用 TSX、不引入 Node
+- 存储 `modernc.org/sqlite`（FTS5 内置），同步 `net/http`（WebDAV），哈希 `blake3`
+- 需要框架没暴露的平台 API（前台应用身份、`CGEvent` 合成 ⌘V）用 `purego`，不引入 cgo
 
 ## 构建
 
 ```bash
-source "$HOME/.cargo/env"   # rustup（cargo 在 ~/.cargo/bin；/opt/homebrew/bin/cargo 已不存在）
-cargo check
-nsh package --target macos
-nsh test
-
-# Windows：交叉编译与打包（macOS 上可跑，真机冒烟另算）
-cargo xwin check --target x86_64-pc-windows-msvc --all-targets
-nsh package --target windows
+go build ./...                 # 编译
+go test ./...                  # 测试
+go vet ./...
+GOOS=windows go build ./...    # Windows 交叉编译（纯 Go，无需 xwin）
+go tool mygo build             # 打包（bundle / dmg / 安装包，需 mygo.config.ts）
 ```
 
-## nsh 0.5.1 已确认的坑（每条都实测过）
+## 目录规划
 
-1. **打包后的应用不执行 `src/main.rs`**：`nsh package` 生成自己的 runner 入口，初始化逻辑必须放在组件里（如 `App()` 顶部调用一次性的 `boot()`）。
-2. **`nsh_core::prelude::window()` 返回 `Size`**，窗口元素是 `nsh_core::element::desktop::window()`。
-3. **`Signal::update(|v| *v = !*v)` 在全局快捷键回调里不执行**，必须 `set(!get())`。
-4. **`WindowAttributes` 是 `non_exhaustive`**，只能用 `WindowAttributes::for_kind(kind)` 再改字段。
-5. **`WindowKind::Popup` 默认 `activate = true`**，要不抢焦点必须显式设 `activate = Some(false)`。
-6. **面板要在打开后延后约 120 ms 再 `focus()`**，否则窗口尚未创建、`focus` 落空，键入会漏到前台应用。
-7. **`WindowRef` 只能从窗口内容渲染里取**（`current_window()`），且非 `Send`，存 `thread_local`。
-8. **`nsh.json` 必须有 `"root": "App"`**，否则被当成 TSX 应用报 `no App.tsx`。
-9. **`lib.rs` 必须有 `#[native_module("<app>/native")]`**，否则打包时 describe bin 编译失败。
-10. **产物体积固定约 50 MB**：`nsh-cli` 生成的 runner 硬编码 8 个 features，`default-features = false` 无效。
+```
+main.go         入口：App.Run + 装配
+internal/paths   数据根目录（不吃 mygo 的 app data 路径）
+internal/db      schema/迁移（只追加）、items、search（FTS5 + LIKE 降级）
+internal/store   记录读写、去重、图片分片、GC
+internal/clip    剪贴板采集（mygo Clipboard.OnChanged + Formats）
+internal/sensitive 敏感应用判定（前台应用身份，purego）
+internal/sync    WebDAV 增量同步 + 端到端加密
+internal/backup  加密备份导入导出
+ui/              面板（mygo ui 自绘）、设置窗、托盘菜单
+tools/           验证脚本（Swift，非产品代码，nsh 时代留下的仍可用）
+docs/            路线图、执行计划、验证记录
+```
 
-## 数据层已确认的坑（P1 实测）
+## 迁移铁律
 
-1. **FTS5 `trigram` 查询词必须 ≥3 个字符**：2 个汉字（「银河」）命中不了，必须降级 `LIKE`（`db::search::FTS_MIN_CHARS`）。
-2. `cargo add chacha20poly1305 argon2` 现在拉到 **0.11 / 0.6**：`Key::from([u8;32])`、`Nonce::from([u8;12])`，`from_slice` 已废弃（编译警告）。
-3. 私有模块里的 `pub` 项会触发 `dead_code` 警告 → 模块本身也要 `pub mod`。
-4. **不要用 `nsh_core::data_dir()` 当数据根**：它返回 `<数据目录>/<app id>`（`com.example.clipnest`）且依赖 nsh 运行时，`cargo test` 里拿不到；根目录统一走 `src/paths.rs`。
-5. 编辑库里加列/加表只能追加迁移脚本（`src/db/schema.rs` 的 `MIGRATIONS`），已发布的脚本不可改。
+1. `docs/路线图.md` 第四节的 **12 条行为契约**在 Go 侧必须逐条成立，改一条要重开评估
+2. `internal/db` 的迁移脚本**只追加**，已发布脚本不可改
+3. `content_hash = blake3("<kind>:<content>")`；去重命中只 `use_count + 1` 并刷新 `updated_at`
+4. 搜索：长词走 FTS5，**trigram 查询词 <3 字符必须降级 `LIKE`**（2 个汉字命中不了）
+5. 自身写回必须被 guard 抑制，不产生新记录
+6. 图片优先于文本；`content` 为 PNG 文件名，文件按 `blake3` 前 2 位分片
+7. 敏感过滤按**应用身份**（macOS bundle id / Windows 进程名）判定，不猜内容
 
-### 面板/键盘（P2 实测）
+## mygo 已确认的坑（探针实测，2026-11-16）
 
-11. **`WindowKind::Popup` 必须 `activate = Some(true)`** 才能收键盘：app 不 active 时 `key=None active=false`，字符全被前台应用吃掉。（P0 记录的「`activate=false` 也能打字」在 0.5.1 当前构建上不成立。）
-12. **`WindowRef::focus()` 必须从主线程调用**：`set_timeout` 的回调里 `MainThreadMarker::new()` 返回 `None`，从那儿调 AppKit 是空操作 → 面板永远成不了 key。要 `run_on_main_thread(...)`。
-13. 输入框 `auto_focus(true)` 拿 field editor 就够了；**再手动 `focus()` 一次会让输入失效**（field editor 重挂）。
-14. 焦点在 `input` 里时 **Esc / ↑↓ 都被输入框吃掉**：必须 `on_key_with(..., When::Always, ...)` 自己绑。⏎ 用 `input().on_submit`。
-15. 列表要包 `dynamic(|| ...)`；静态 `children(...)` 不刷新（底部响应式计数会正常，容易误判成「列表没问题」）。
-16. `#[component] fn Panel()` 的构造器是**小写** `panel()`（宏生成 `PanelElement` + `panel()`），`Panel()` 编译不过。
-17. `run_app` 总会开一个主窗口，常驻应用要在根组件里 `current_window().hide()`。
-18. **`Signal` 要放 `static`，不要放 `thread_local`**：`set_timeout`、托盘菜单的回调可能不在主线程，thread_local 里读到的是 `None`（设置窗因此打不开）。`Signal` 是 `Copy + Send + Sync`；`WindowRef`/`ElementRef` 才留在 thread_local。
-19. 托盘图标 16 pt 纯图标既难确认也点不准：给 `Tray::title()` 配一个字符（如 `❐`），`System Events` 就能按名字点到。SVG 图标走模板渲染，笔画只用 `black`。
-20. 受控 `input`（`.value(信号)`）在 `on_change` 里必须同步更新那个信号，否则输入被回滚。
-21. **主窗口不能 `hide()`**：一隐藏应用就不算 active，面板永远成不了 key window（`key=None active=false`，键盘全丢）。做法：去掉标题栏 + `transparent` + `set_bounds` 挪到屏幕外（系统最多只让到 `x=-380`，剩 40pt）+ `pointer_events: None` + 根视图背景透明。
-22. **`⌘⇧X` 这类 shift 组合到不了 keymap**（`mod+shift+c` 实测不触发，osascript 与 CGEvent 都不行）；单修饰组合（`⌘P`/`⌘S`/`⌘D`/`⌘Y`）正常。
-23. **`close_on_blur` 会和重渲染打架**：列表变化 → field editor 重挂 → 收到 blur → 面板自己关掉。设 `close_on_blur = Some(false)`，收起只认 Esc（或粘贴后 `dismiss()`）。
-24. 响应式列表用 `each(rows, |r| r.id, …)`：静态 `children` 不刷新，`dynamic` 整块重建会把搜索框焦点搞丢。行渲染函数返回具体 `View`（`impl IntoElement` 会带出 `&Row` 生命周期，E0515）。
-25. 面板激活自己会抢走前台：粘贴流程 = 写回 → `dismiss()`（隐藏 + `NSRunningApplication::activate` 原应用）→ 120 ms → ⌘V；原应用 pid 在打开前用 `NSWorkspace.frontmostApplication()` 记。
-
-## 导出与剪贴板文件（P3 实测）
-
-1. **nsh 0.5.1 没有 drag-out**（只能接收 drop，也不暴露 NSView）：导出走「写文件 + `set_files` 放剪贴板」。
-2. **写剪贴板文件后前台会被抢回原应用**：面板还在但收不到键盘 → 导出成功后补一次 `focus_panel()`。
-3. **小图别让 `image` 重编码当缩略图**：128×128 的图 AppKit 编码 3.8K、`image` 重编码 39K（比原图还大）。只在最长边 > 320 时才真缩，否则拷原图字节。
-
-## 窗口位置与图片（P3/P6 实测）
-
-1. **`WindowRef::set_bounds` 对 `WindowKind::Popup` 无效**：运行中挪窗口完全不生效（探针设 (10,10)，窗口仍停在原处）。位置只能用 `window().default_position(WindowPosition::At(..))`，且**只在窗口创建时**生效；多屏/设置改动都要「下次启动」。
-2. **打包版 runner 里 `boot()` 不在主线程**：`MainThreadMarker::new()` 返回 `None`，`NSScreen`/`NSEvent` 都用不了。要屏幕信息就用 CoreGraphics（`CGDisplay::main().bounds()`，任意线程）。
-3. **`image().object_fit(ResizeMode::Contain)` 实测不生效**（按 Cover 裁切）：自己按 `width/height` 算显示尺寸。
-4. 文字别用 `muted_foreground`（暗色 9pt 下读不清），统一 `foreground`，层级靠字号。
-4.1 `input().placeholder_color(..)` / `caret_color(..)` 只收 `Hsla`（`theme()` 给的是 `AdaptiveColor`）：用 `pick_foreground()`（`dark()` 选 `.dark`/`.light`）。placeholder 与输入文字都要显式设色，默认色在深底上几乎看不见。
-5. **`dynamic` 包固定尺寸元素会整块不绘制**：`dynamic(move || view().w(..).h(..).bg(..))` 实测连背景都画不出来（窗口透出下层）。要「按状态换内容」就用**容器常驻 + 属性闭包**（`image(move || src).w(move || px(..))`）。
-6. 拖窗口用 `.window_drag(true)`（AppKit `performWindowDragWithEvent:` / Win32 `HTCAPTION`），放在根视图上不影响输入框与行的点击。
-7. **预览放左右分栏，别放列表上方**：放上面会把内容整体往下挤（用户实测反馈）。面板宽度 (720) 与高度 (560) 都是窗口创建时定死的，改布局只能动内部 flex。
-
-## 状态与自检（P6 实测）
-
-1. **`Signal::set` 必须在组件的渲染体 / effect 里**：`boot()`（`run_app` 之前的纯函数）里 set 不报错但不触发重渲染（自检窗口因此在日志里「打开了」却从未出现）。跨线程改状态用「写 static → UI 里 `set_interval` 轮询」。
-2. 界面上的长任务（同步/更新）一律后台线程 + static 状态文字；备份这种几十毫秒的可以同步做。
-3. 备份口令（每次手输）与同步口令（钥匙串）是两个东西，别混。
-
-## 发布（P6）
-
-1. **签名免费、公证付费**：ad-hoc/自签都能签，但 Gatekeeper 不认；`Developer ID` 证书与 `notarytool` 必须 Apple Developer Program（$99/年）。
-2. 零成本分发 = 自建 Homebrew tap（cask 的 `postflight` 跑 `xattr -dr com.apple.quarantine`）+ GitHub Releases；官方 homebrew-cask 要求已公证，收不了。
-3. 打发布包：`OWNER=<user> REPO=clipnest tools/release.sh <ver>` → `dist/` 里的两平台 zip + SHA256SUMS + 渲染好的 cask。
-4. bash 里 `$VERSION（` 这种「变量紧跟中文」会被当成变量名一部分报 unbound，一律写 `${VERSION}`。
-
-## Windows 侧（P5）
-
-1. **Win32 是物理像素，nsh 的 `set_bounds` 要逻辑点**：`GetCursorPos`/`rcWork` 的坐标要除 `GetDpiForMonitor/96`，否则高 DPI 下面板跑偏。
-2. **nsh 的 `activate` 在 Windows 上只做 `ShowWindow(SW_SHOW)`**，不保证前台；收键盘要靠 `SetForegroundWindow`（`clipboard::claim_foreground()` 用 `EnumWindows` 找本进程窗口）。
-3. `clipboard-rs` 在 Windows 上走 `CF_DIB`/`CF_DIBV5` + `BmpDecoder`，`image` 的 `bmp` feature 必须开（截图工具的 Win+Shift+S 只写 DIB）。
-4. 单实例靠 `nsh.json` 的 `"singleInstance": true`（命名互斥量），否则双开会有两个托盘图标。
-
-## 同步（P4 实测）
-
-1. **`sync.json` 独立于 `settings.json`**，口令一律进系统钥匙串；配置文件里出现密码就是 bug。
-2. serde `rename_all = "snake_case"` 会把 `WebDav` 写成 `web_dav`，要显式 `#[serde(rename = "webdav")]`。
-3. `boot()` 不在响应式上下文里：别在里面调 `set_timeout` / `signal`（会 panic `no reactive runtime`），用普通线程。
-4. WebDAV 实现用 **reqwest**（blocking + rustls + http2）：ureq 的协议层只允许标准方法，**发不出 PROPFIND**（实测 `PROPFIND not valid for HTTP version HTTP/1.1`）。
-5. reqwest 必须 `.no_proxy()`：本机 `HTTPS_PROXY` 会把局域网 IP 也送进代理，每个请求卡到 20 秒超时。
-6. 飞牛 fnOS：根目录只读（`MKCOL`/`PUT` 都 405），要用 `/data/...`；父目录不存在时回 **403**（不是 409），`put()` 要按 403/404/409 都先 `MKCOL`。
-7. 自签证书走 `danger_accept_invalid_certs`（`sync.json` 的 `insecure_tls`）。
-8. 删条目要连带删图片文件：`store::remove`（行 + origin + thumb）；`prune` 逐个 remove，启动时 `collect_garbage` 扫孤儿。远端 `blobs/` 不删（多设备共享）。
-
-## 开机自启与权限（P3 实测）
-
-1. **macOS 写完 LaunchAgent plist 不要 `launchctl load`**：`RunAtLoad` 会让它立刻再起一个实例（实测进程变 2 个）。只写文件，登录时 launchd 自己会加载。
-2. 辅助功能权限用 `AXIsProcessTrusted()`；没授权时面板顶部给提示 + 跳系统设置（`x-apple.systempreferences:…Privacy_Accessibility`）。自检可用 `SPIKE_NO_AX=1` 伪造。
-
-## 列表与过滤（P3 实测）
-
-1. **`each(rows, |r| r.id, …)` 的 key 要带上影响显示的字段**：只用 id 时，改置顶/收藏/敏感不会重画（行内容是一次性快照），要把 `(id, pinned, favorite, sensitive, summary, time)` 都放进 key。
-2. 敏感过滤按**应用身份**（macOS bundle id / Windows 进程名）判定，别猜内容；名单见 `src/sensitive.rs`，`settings.json` 的 `sensitive_apps` 可覆盖，`ignore_sensitive_apps` 是总开关。
-
-## 多屏与平台 API（P3 实测）
-
-1. **`nsh_core::element::desktop::displays()` 不能在 `run_on_main_thread` 回调里调用**：它读 nsh 的响应式环境，会 panic（`no reactive runtime`）。要屏幕信息就自己问系统（macOS `NSScreen`、Windows `MonitorFromPoint`），只把算好的坐标交给 `WindowRef::set_bounds`。
-2. macOS `NSScreen.frame` 是左下原点、y 向上；nsh 的屏幕坐标是左上原点、y 向下，换算 `top = 主屏高度 - (frame.y + frame.height)`。
-
-## 图片（P3 实测）
-
-1. **`clipboard-rs` 的 `image` 只开 `png`/`jpeg` 解码**：macOS 截图常只给 TIFF，`get_image()` 会失败。兜底走 AppKit 重编码（`NSImage → NSBitmapImageRep → representationUsingType(PNG)`），别指望 `image` crate 解 NSImage 出的 TIFF。
-2. 图片文件名 = `blake3(png 字节)`：内容哈希即文件名，去重与分片（`<hash前2>/`）都靠它。
-3. 图片优先于文本：复制截图时系统同时给文本/位图 flavor，`store::record` 只留图片条目。
-
-## 代码检索
-
-本仓库已有 `.codegraph/` 索引（codegraph 1.6.2）。改代码前优先走 codegraph MCP（`codegraph_explore`，传 `projectPath=/Users/nekoleamo/Documents/Working/clipnest`），不要逐个 grep/read。改动较大后重建：`codegraph init`（增量）或 `codegraph status` 查是否过期。
-
-## 代码约定
-
-- 注释、文档一律中文
-- `src/lib.rs` 只放组件与 UI 装配，平台/剪贴板/存储逻辑按模块拆到 `src/<模块>.rs`
-- 验证脚本放 `tools/`，用 `//` 注释说明用途，不参与构建
-- 每个平台行为（焦点、权限、剪贴板时序）改动后，必须回到 `docs/2026-11-15-nsh-验证记录.md` 对应项复测并更新状态
+1. `go get` 后必须 `go mod tidy`，否则 `ui`/`internal/text` 的间接依赖缺 `go.sum` 条目编译失败
+2. `Tray.Bounds()` 在 `NewTray` 后立即读是 `Height:0`，要等布局完成（点击/托盘弹出位置别用它算）
+3. 面板位置在**运行时**可以随便改：`Screen.CursorScreenPoint()` + `Screen.DisplayNearestPoint()` + `panel.SetPosition()`，不存在 nsh 那种「只能在创建时定死」
+4. `Panel: true` 的窗口在 macOS 是 `NSPanel` 非激活样式：抢键盘但不激活 app；`OnClose` 里必须 `PreventDefault` + `Hide`，否则窗口被销毁、下次唤醒要重建
+5. `Clipboard.OnChanged` 在 macOS 是 250ms `changeCount` 轮询（不在复制瞬间触发），采集逻辑要容忍这个延迟
+66. 应用是 accessory（无 Dock 图标）时要同时 `OnWindowAllClosed(func(){})`，否则关掉最后一个窗口就退出
 
 ## 每轮收尾
 
-- `cargo test` 全绿、`cargo check` 不新增 warning
-- 改了平台行为 → 复跑 `tools/` 脚本并更新 `docs/2026-11-15-nsh-验证记录.md` 的状态
-- 新发现的坑补到本文（nsh 版本相关的必须记）
-- 改动多则刷新索引：`codegraph init`
+- `go test ./...` 全绿、`go vet ./...` 无新告警
+- 改了平台行为 → 复跑 `tools/` 脚本并更新 `docs/` 验证记录
+- 新发现的坑补到本文
 - 提交消息用中文前缀：`feat:` / `fix:` / `docs:` / `chore:`
-
-## 验证方法（无需人工点鼠标的部分）
-
-- 窗口层级/是否可见：`tools/wins.swift`（CGWindowList，`layer=3` 即 floating panel）
-- 前台应用：`lsappinfo info -only name $(lsappinfo front)`
-- 合成按键：`tools/keys3.swift`（⌘⇧V / ⌘V / Esc / 单字符）
-- 粘贴目标：`tools/paste_target.swift`（自带 Edit 菜单的 NSTextView 窗口，粘贴后打印内容）
-- 剪贴板写入：`tools/pb.swift`（text / html / rtf / image / files）
-
-需要 macOS 辅助功能授权（系统设置 → 隐私与安全性 → 辅助功能），否则合成按键与 ⌘V 会被系统丢弃。
