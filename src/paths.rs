@@ -146,11 +146,10 @@ fn platform_root(
         let home = home.unwrap_or_else(|| PathBuf::from("."));
         return home.join("Library").join("Application Support").join("clipnest");
     }
-    if windows {
-        if let Some(appdata) = appdata {
+    if windows
+        && let Some(appdata) = appdata {
             return appdata.join("clipnest");
         }
-    }
     if let Some(xdg) = xdg {
         return xdg.join("clipnest");
     }

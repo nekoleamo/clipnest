@@ -83,7 +83,7 @@ pub fn save_settings(next: settings::Settings) -> bool {
 
 /// 退出应用（托盘菜单用）。
 pub fn quit_app() {
-    logs::line("QUIT from tray".to_owned());
+    logs::line("QUIT from tray");
     nsh_core::element::desktop::quit();
 }
 
@@ -106,7 +106,7 @@ pub fn open_prefs() {
     logs::line(format!("PREFS request had_signal={}", PREFS.get().is_some()));
     if let Some(open) = PREFS.get() {
         open.set(true);
-        logs::line("PREFS set true".to_owned());
+        logs::line("PREFS set true");
     }
 }
 
@@ -155,7 +155,7 @@ pub fn App() -> impl IntoElement {
     // 全局快捷键：切换面板。注册一次即可。
     effect(move || {
         let answer = register_global_shortcut("mod+shift+v", move || {
-            logs::line("SHORTCUT mod+shift+v".to_owned());
+            logs::line("SHORTCUT mod+shift+v");
             toggle_panel();
         });
         spawn(async move {
@@ -209,7 +209,7 @@ pub fn App() -> impl IntoElement {
 
     view()
         .flex_1()
-        .bg(move || transparent_black())
+        .bg(transparent_black)
         .child(
         window()
             .id("panel")
@@ -270,7 +270,7 @@ pub fn App() -> impl IntoElement {
                     }
                     logs::line(format!("PREFS open={} reason={:?}", e.open, e.reason));
                 })
-                .content(|| prefs::prefs()),
+                .content(prefs::prefs),
         )
 }
 

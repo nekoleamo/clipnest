@@ -261,15 +261,15 @@ pub fn Panel() -> impl IntoElement {
     // 保证首次显示时搜索框被聚焦、列表是最新的。
     let known_open = signal(u64::MAX);
     let known_count = signal(store::count().unwrap_or(-1));
-    let q_poll = q.clone();
-    let rows_poll = rows.clone();
-    let sel_poll = sel.clone();
+    let q_poll = q;
+    let rows_poll = rows;
+    let sel_poll = sel;
     effect(move || {
-        let known_open = known_open.clone();
-        let known_count = known_count.clone();
-        let q_poll = q_poll.clone();
-        let rows_poll = rows_poll.clone();
-        let sel_poll = sel_poll.clone();
+        let known_open = known_open;
+        let known_count = known_count;
+        let q_poll = q_poll;
+        let rows_poll = rows_poll;
+        let sel_poll = sel_poll;
         set_interval(Duration::from_millis(150), move || {
             let opens = crate::opens();
             let count = store::count().unwrap_or(-1);
@@ -301,13 +301,13 @@ pub fn Panel() -> impl IntoElement {
         repeat: true,
         pass_through: false,
     };
-    let list_keys = list.clone();
-    let rows_key = rows.clone();
-    let sel_key = sel.clone();
+    let list_keys = list;
+    let rows_key = rows;
+    let sel_key = sel;
     effect(move || {
-        let rows_dn = rows_key.clone();
-        let sel_dn = sel_key.clone();
-        let list_dn = list_keys.clone();
+        let rows_dn = rows_key;
+        let sel_dn = sel_key;
+        let list_dn = list_keys;
         on_key_with("down", arrows, move |_| {
             let n = rows_dn.with(Vec::len);
             if n == 0 {
@@ -319,13 +319,13 @@ pub fn Panel() -> impl IntoElement {
         });
         // 焦点在搜索框里时 Esc 会被 input 吃掉，窗口自己收不起来，自己绑。
         on_key_with("escape", arrows, |_| {
-            logs::line("ESC dismiss".to_owned());
+            logs::line("ESC dismiss");
             crate::dismiss();
         });
 
         // ⌘1-9：直接粘贴第 N 条（不用先移动选中）
         for i in 1..=9u8 {
-            let rows_n = rows.clone();
+            let rows_n = rows;
             on_key_with(&format!("mod+{i}"), arrows, move |_| {
                 let target = rows_n.with(|r| r.get(i as usize - 1).cloned());
                 if let Some(row) = target {
@@ -335,7 +335,7 @@ pub fn Panel() -> impl IntoElement {
         }
 
         // ⌘D 删除
-        let (rows_d, sel_d, q_d) = (rows.clone(), sel.clone(), q.clone());
+        let (rows_d, sel_d, q_d) = (rows, sel, q);
         on_key_with("mod+d", arrows, move |_| {
             if let Some(row) = selected(&rows_d, &sel_d)
                 && remove(&row)
@@ -345,7 +345,7 @@ pub fn Panel() -> impl IntoElement {
         });
 
         // ⌘P 置顶（会改变排序，必须重查）
-        let (rows_p, sel_p, q_p) = (rows.clone(), sel.clone(), q.clone());
+        let (rows_p, sel_p, q_p) = (rows, sel, q);
         on_key_with("mod+p", arrows, move |_| {
             if let Some(row) = selected(&rows_p, &sel_p)
                 && toggle_flag(&row, true).is_some()
@@ -355,7 +355,7 @@ pub fn Panel() -> impl IntoElement {
         });
 
         // ⌘S 收藏（不改 updated_at，不改变排序，但行上要出现 ★）
-        let (rows_f, sel_f, q_f) = (rows.clone(), sel.clone(), q.clone());
+        let (rows_f, sel_f, q_f) = (rows, sel, q);
         on_key_with("mod+s", arrows, move |_| {
             if let Some(row) = selected(&rows_f, &sel_f)
                 && toggle_flag(&row, false).is_some()
@@ -366,15 +366,15 @@ pub fn Panel() -> impl IntoElement {
 
         // ⌘Y 复制到剪贴板（yank；不粘贴、不收起面板）。
         // 不用 ⌘⇧C：实测 shift 组合到不了 keymap（osascript 与 CGEvent 都试过）。
-        let (rows_c, sel_c) = (rows.clone(), sel.clone());
+        let (rows_c, sel_c) = (rows, sel);
         on_key_with("mod+y", arrows, move |_| {
             if let Some(row) = selected(&rows_c, &sel_c) {
                 copy(&row);
             }
         });
-        let rows_up = rows_key.clone();
-        let sel_up = sel_key.clone();
-        let list_up = list_keys.clone();
+        let rows_up = rows_key;
+        let sel_up = sel_key;
+        let list_up = list_keys;
         on_key_with("up", arrows, move |_| {
             if rows_up.with(Vec::len) == 0 {
                 return;
@@ -385,9 +385,9 @@ pub fn Panel() -> impl IntoElement {
         });
     });
 
-    let q_change = q.clone();
-    let rows_change = rows.clone();
-    let sel_change = sel.clone();
+    let q_change = q;
+    let rows_change = rows;
+    let sel_change = sel;
     let field = input()
         .auto_focus(true)
         .value(move || q.get())
@@ -406,8 +406,8 @@ pub fn Panel() -> impl IntoElement {
                 rows_change.with(Vec::len)
             ));
         })
-        .on_focus(move |_: &()| logs::line("FIELD focused".to_owned()))
-        .on_blur(move |_: &()| logs::line("FIELD blurred".to_owned()))
+        .on_focus(move |_: &()| logs::line("FIELD focused"))
+        .on_blur(move |_: &()| logs::line("FIELD blurred"))
         .on_submit(move |_: &str| {
             let Some(row) = rows_change.with(|r| r.get(sel.get()).cloned()) else {
                 return;
@@ -415,8 +415,8 @@ pub fn Panel() -> impl IntoElement {
             paste(&row);
         });
 
-    let rows_view = rows.clone();
-    let sel_view = sel.clone();
+    let rows_view = rows;
+    let sel_view = sel;
 
 
     view()
@@ -440,15 +440,15 @@ pub fn Panel() -> impl IntoElement {
                         .flex_col()
                         .gap_1()
                         .child(each(
-                            rows_view.clone(),
+                            rows_view,
                             |row: &Row| row.id,
                             move |row, index| {
                                 let r = row.get();
                                 let i = index.get();
-                                row_view(&r, i, sel_view.clone())
+                                row_view(&r, i, sel_view)
                             },
                         ))
-                        .child(empty_hint(rows_view.clone())),
+                        .child(empty_hint(rows_view)),
                 ),
         )
         .child(
@@ -478,8 +478,8 @@ fn row_view(row: &Row, index: usize, sel: Signal<usize>) -> View {
     let time = row.time.clone();
     let pinned = row.pinned;
     let favorite = row.favorite;
-    let sel_press = sel.clone();
-    let sel_bg = sel.clone();
+    let sel_press = sel;
+    let sel_bg = sel;
     view()
         .flex()
         .items_center()
@@ -505,7 +505,7 @@ fn row_view(row: &Row, index: usize, sel: Signal<usize>) -> View {
             .text_color(move || theme().muted_foreground),
         )
         .child(
-            text(format!("{tag}"))
+            text(tag.to_string())
                 .text_size(px(10.0))
                 .text_color(move || theme().muted_foreground),
         )

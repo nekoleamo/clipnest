@@ -18,8 +18,8 @@ pub fn Prefs() -> impl IntoElement {
     let current = signal(crate::settings());
     let note = signal(String::new());
 
-    let max_now = current.clone();
-    let note_max = note.clone();
+    let max_now = current;
+    let note_max = note;
     let max_field = input()
         .value(move || max_now.with(|s| s.max_items.to_string()))
         .text_size(px(12.0))
@@ -34,7 +34,7 @@ pub fn Prefs() -> impl IntoElement {
                 return;
             };
             let saved = apply(
-                current.clone(),
+                current,
                 Settings {
                     max_items: n,
                     ..current.get()
@@ -43,9 +43,9 @@ pub fn Prefs() -> impl IntoElement {
             note_max.set(format!("已保存：最多保留 {} 条", saved.max_items));
         });
 
-    let height_now = current.clone();
-    let note_h = note.clone();
-    let current_h = current.clone();
+    let height_now = current;
+    let note_h = note;
+    let current_h = current;
     let height_field = input()
         .value(move || height_now.with(|s| s.panel_height.to_string()))
         .text_size(px(12.0))
@@ -60,7 +60,7 @@ pub fn Prefs() -> impl IntoElement {
                 return;
             };
             let saved = apply(
-                current_h.clone(),
+                current_h,
                 Settings {
                     panel_height: n,
                     ..current_h.get()
@@ -72,7 +72,7 @@ pub fn Prefs() -> impl IntoElement {
             ));
         });
 
-    let note_clean = note.clone();
+    let note_clean = note;
     let clean = button("立即清理").on_press(move |_: &()| {
         let s = crate::settings();
         let Some(db) = store::db() else {
@@ -93,9 +93,10 @@ pub fn Prefs() -> impl IntoElement {
         }
     });
 
-    let note_reveal = note.clone();
+    let note_reveal = note;
     let reveal = button("打开数据目录").on_press(move |_: &()| {
-        let _ = reveal_path(crate::paths().root());
+        // 结果不重要：系统要么打开了，要么没反应（没有需要处理的失败分支）。
+        drop(reveal_path(crate::paths().root()));
         note_reveal.set("已在访达中打开".to_owned());
     });
 
@@ -159,7 +160,7 @@ pub fn Prefs() -> impl IntoElement {
 fn apply(current: Signal<Settings>, next: Settings) -> Settings {
     let s = next.normalized();
     if !crate::save_settings(s.clone()) {
-        logs::line("SETTINGS 保存失败".to_owned());
+        logs::line("SETTINGS 保存失败");
         return crate::settings();
     }
     current.set(s.clone());

@@ -37,5 +37,5 @@ pub fn attach(on_toggle: impl Fn() + 'static, on_prefs: impl Fn() + 'static) {
             ])
             .on_click(move |_| click()),
     );
-    crate::logs::line("TRAY attached".to_owned());
+    crate::logs::line("TRAY attached");
 }
