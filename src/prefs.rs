@@ -85,14 +85,22 @@ pub fn Prefs() -> impl IntoElement {
             note_clean.set("数据库被占用，稍后再试".to_owned());
             return;
         };
-        match store::prune(&conn, s.max_items) {
-            Ok(0) => note_clean.set("没有需要清理的条目".to_owned()),
-            Ok(n) => {
-                logs::line(format!("PRUNE manual removed={n}"));
-                note_clean.set(format!("已清理 {n} 条（收藏与置顶保留）"));
+        let pruned = match store::prune(&conn, s.max_items) {
+            Ok(n) => n,
+            Err(e) => {
+                note_clean.set(format!("清理失败：{e}"));
+                return;
             }
-            Err(e) => note_clean.set(format!("清理失败：{e}")),
+        };
+        let orphans = store::collect_garbage(&conn).unwrap_or(0);
+        if pruned == 0 && orphans == 0 {
+            note_clean.set("没有需要清理的条目或图片".to_owned());
+            return;
         }
+        logs::line(format!("PRUNE manual removed={pruned} images={orphans}"));
+        note_clean.set(format!(
+            "已清理 {pruned} 条（收藏与置顶保留）、{orphans} 个孤儿图片文件"
+        ));
     });
 
     let note_reveal = note;

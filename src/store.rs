@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use crate::db;
 use crate::db::items::{self, UpsertResult};
@@ -178,6 +178,85 @@ pub fn open(paths: &Paths) -> Result<Connection, Box<dyn std::error::Error>> {
     Ok(db::open(paths.db())?)
 }
 
+/// 删一条：库里删掉，图片条目连 `images/` 里的原图与缩略图一起删。
+///
+/// 图片文件名就是内容哈希，所以同一张图只有一条记录、一组文件，删了不会误伤别的条目。
+pub fn remove(conn: &Connection, id: i64) -> rusqlite::Result<bool> {
+    remove_at(crate::paths(), conn, id)
+}
+
+/// [`remove`] 指定数据根（测试用）。
+pub fn remove_at(paths: &Paths, conn: &Connection, id: i64) -> rusqlite::Result<bool> {
+    let image: Option<String> = conn
+        .query_row(
+            "SELECT content FROM items WHERE id = ?1 AND kind = 'image'",
+            [id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if !items::delete(conn, id)? {
+        return Ok(false);
+    }
+    if let Some(content) = image {
+        delete_image_files_at(paths, &content);
+    }
+    Ok(true)
+}
+
+/// 删掉某个图片条目的原图与缩略图（文件不在就跳过）。
+fn delete_image_files_at(paths: &Paths, content: &str) {
+    let hash = content.strip_suffix(".png").unwrap_or(content);
+    for path in [paths.image_origin(hash), paths.image_thumbnail(hash)] {
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => crate::logs::line(format!("IMAGE delete failed {}: {e}", path.display())),
+        }
+    }
+}
+
+/// 扫 `images/` 里没有对应条目的孤儿文件（历史遗留、导入失败留下的）并删掉。
+///
+/// 返回删除的文件数。启动时跑一次就够了，成本是一次目录遍历。
+pub fn collect_garbage(conn: &Connection) -> rusqlite::Result<usize> {
+    collect_garbage_at(crate::paths(), conn)
+}
+
+/// [`collect_garbage`] 指定数据根（测试用）。
+pub fn collect_garbage_at(paths: &Paths, conn: &Connection) -> rusqlite::Result<usize> {
+    let mut wanted: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut stmt = conn.prepare("SELECT content FROM items WHERE kind = 'image'")?;
+    let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+    for row in rows {
+        let content = row?;
+        wanted.insert(content.strip_suffix(".png").unwrap_or(&content).to_owned());
+    }
+
+    let mut removed = 0;
+    for dir in ["origin", "thumbnails"] {
+        let root = paths.images_dir().join(dir);
+        let Ok(shards) = std::fs::read_dir(&root) else {
+            continue;
+        };
+        for shard in shards.flatten() {
+            let Ok(files) = std::fs::read_dir(shard.path()) else {
+                continue;
+            };
+            for file in files.flatten() {
+                let name = file.file_name().to_string_lossy().to_string();
+                let hash = name.strip_suffix(".png").unwrap_or(&name);
+                if wanted.contains(hash) {
+                    continue;
+                }
+                if std::fs::remove_file(file.path()).is_ok() {
+                    removed += 1;
+                }
+            }
+        }
+    }
+    Ok(removed)
+}
+
 /// 契约 9：按上限裁剪历史，收藏与置顶永远保留。
 ///
 /// 只删「既不收藏也不置顶」里最旧的那些，`max_items` 是总条数上限，
@@ -192,15 +271,23 @@ pub fn prune(conn: &Connection, max_items: i64) -> rusqlite::Result<usize> {
         |r| r.get(0),
     )?;
     let keep = (max_items - protected).max(0);
-    let deleted = conn.execute(
-        "DELETE FROM items WHERE id IN (
-             SELECT id FROM items
+    // 先取出要删的 id：删条目要连带删图片文件（`remove` 里做）。
+    let victims: Vec<i64> = {
+        let mut stmt = conn.prepare(
+            "SELECT id FROM items
              WHERE pinned = 0 AND favorite = 0
              ORDER BY updated_at DESC, id DESC
-             LIMIT -1 OFFSET ?1
-         )",
-        [keep],
-    )?;
+             LIMIT -1 OFFSET ?1",
+        )?;
+        let rows = stmt.query_map([keep], |r| r.get::<_, i64>(0))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let mut deleted = 0;
+    for id in victims {
+        if remove(conn, id)? {
+            deleted += 1;
+        }
+    }
     Ok(deleted)
 }
 
@@ -401,6 +488,69 @@ mod tests {
         let origin = std::fs::read(paths.image_origin(hash)).unwrap();
         let thumb = std::fs::read(paths.image_thumbnail(hash)).unwrap();
         assert_eq!(thumb, origin, "小图不该让 image 重编码（会更大）");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn deleting_an_image_removes_its_files() {
+        let root = std::env::temp_dir().join(format!("clipnest-store-del-{}", crate::model::now()));
+        let paths = Paths::from_root(&root);
+        let conn = db::open_memory().unwrap();
+        let png = png_of(64, 64, [10, 20, 30, 255]);
+        let cap = Captured {
+            image: Some(ImageBytes {
+                png,
+                width: 64,
+                height: 64,
+            }),
+            ..Default::default()
+        };
+        let stored = record_at(&paths, &conn, &cap).unwrap();
+        let item = items::get(&conn, stored[0].result.id()).unwrap().unwrap();
+        let hash = item.content.strip_suffix(".png").unwrap().to_owned();
+        assert!(paths.image_origin(&hash).exists());
+
+        assert!(remove_at(&paths, &conn, stored[0].result.id()).unwrap());
+        assert!(!paths.image_origin(&hash).exists(), "原图要删掉");
+        assert!(!paths.image_thumbnail(&hash).exists(), "缩略图也要删");
+        assert!(items::get(&conn, stored[0].result.id()).unwrap().is_none());
+        // 删第二次返回 false，不报错
+        assert!(!remove_at(&paths, &conn, stored[0].result.id()).unwrap());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn garbage_collector_removes_orphan_images() {
+        let root = std::env::temp_dir().join(format!("clipnest-store-gc-{}", crate::model::now()));
+        let paths = Paths::from_root(&root);
+        let conn = db::open_memory().unwrap();
+        // 一条有记录的图 + 一个没人引用的孤儿文件
+        let png = png_of(32, 32, [1, 2, 3, 255]);
+        record_at(
+            &paths,
+            &conn,
+            &Captured {
+                image: Some(ImageBytes {
+                    png,
+                    width: 32,
+                    height: 32,
+                }),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let orphan_hash = "ff".repeat(32);
+        let (origin, thumb) = paths.ensure_image_dirs(&orphan_hash).unwrap();
+        std::fs::write(&origin, b"stale").unwrap();
+        std::fs::write(&thumb, b"stale").unwrap();
+
+        let removed = collect_garbage_at(&paths, &conn).unwrap();
+        assert_eq!(removed, 2, "两个孤儿文件都要清掉");
+        assert!(!origin.exists());
+        // 有记录的图要留着
+        let item = items::get(&conn, 1).unwrap().unwrap();
+        let hash = item.content.strip_suffix(".png").unwrap();
+        assert!(paths.image_origin(hash).exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 

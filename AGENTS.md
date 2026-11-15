@@ -75,6 +75,7 @@ nsh package --target windows
 5. reqwest 必须 `.no_proxy()`：本机 `HTTPS_PROXY` 会把局域网 IP 也送进代理，每个请求卡到 20 秒超时。
 6. 飞牛 fnOS：根目录只读（`MKCOL`/`PUT` 都 405），要用 `/data/...`；父目录不存在时回 **403**（不是 409），`put()` 要按 403/404/409 都先 `MKCOL`。
 7. 自签证书走 `danger_accept_invalid_certs`（`sync.json` 的 `insecure_tls`）。
+8. 删条目要连带删图片文件：`store::remove`（行 + origin + thumb）；`prune` 逐个 remove，启动时 `collect_garbage` 扫孤儿。远端 `blobs/` 不删（多设备共享）。
 
 ## 开机自启与权限（P3 实测）
 

@@ -192,7 +192,7 @@ pub fn remove(row: &Row) -> bool {
     let Ok(conn) = db.lock() else {
         return false;
     };
-    match db::items::delete(&conn, row.id) {
+    match store::remove(&conn, row.id) {
         Ok(true) => {
             logs::line(format!("DELETE id={}", row.id));
             true

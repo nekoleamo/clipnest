@@ -591,6 +591,12 @@ pub fn boot() {
                 Err(e) => logs::line(format!("PRUNE startup ERROR {e}")),
                 _ => {}
             }
+            // 孤儿图片（历史遗留、导入失败留下的）在启动时扫一次。
+            match store::collect_garbage(&conn) {
+                Ok(0) => {}
+                Ok(n) => logs::line(format!("IMAGE gc startup removed={n}")),
+                Err(e) => logs::line(format!("IMAGE gc startup ERROR {e}")),
+            }
         }
     });
 }
