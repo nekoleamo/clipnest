@@ -66,6 +66,13 @@ nsh package --target windows
 2. **写剪贴板文件后前台会被抢回原应用**：面板还在但收不到键盘 → 导出成功后补一次 `focus_panel()`。
 3. **小图别让 `image` 重编码当缩略图**：128×128 的图 AppKit 编码 3.8K、`image` 重编码 39K（比原图还大）。只在最长边 > 320 时才真缩，否则拷原图字节。
 
+## 发布（P6）
+
+1. **签名免费、公证付费**：ad-hoc/自签都能签，但 Gatekeeper 不认；`Developer ID` 证书与 `notarytool` 必须 Apple Developer Program（$99/年）。
+2. 零成本分发 = 自建 Homebrew tap（cask 的 `postflight` 跑 `xattr -dr com.apple.quarantine`）+ GitHub Releases；官方 homebrew-cask 要求已公证，收不了。
+3. 打发布包：`OWNER=<user> REPO=clipnest tools/release.sh <ver>` → `dist/` 里的两平台 zip + SHA256SUMS + 渲染好的 cask。
+4. bash 里 `$VERSION（` 这种「变量紧跟中文」会被当成变量名一部分报 unbound，一律写 `${VERSION}`。
+
 ## Windows 侧（P5）
 
 1. **Win32 是物理像素，nsh 的 `set_bounds` 要逻辑点**：`GetCursorPos`/`rcWork` 的坐标要除 `GetDpiForMonitor/96`，否则高 DPI 下面板跑偏。
