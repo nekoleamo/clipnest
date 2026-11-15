@@ -29,12 +29,16 @@ pub fn open(path: impl AsRef<Path>) -> Result<Connection> {
         })?;
     }
     let conn = Connection::open(path)?;
-    prepare(conn)
+    let mut conn = prepare(conn)?;
+    schema::migrate(&mut conn)?;
+    Ok(conn)
 }
 
-/// 内存库，测试用。
+/// 内存库，测试用（也跑一遍迁移，schema 与真实库一致）。
 pub fn open_memory() -> Result<Connection> {
-    prepare(Connection::open_in_memory()?)
+    let mut conn = prepare(Connection::open_in_memory()?)?;
+    schema::migrate(&mut conn)?;
+    Ok(conn)
 }
 
 /// 每条连接都要做的 pragma。
@@ -52,12 +56,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn opens_in_memory() {
+    fn opens_in_memory_at_current_version() {
         let conn = open_memory().expect("memory db");
-        let v: i64 = conn
-            .query_row("PRAGMA user_version", [], |r| r.get(0))
-            .expect("user_version");
-        assert_eq!(v, 0, "新建库还没迁过");
+        assert_eq!(
+            schema::version(&conn).expect("user_version"),
+            schema::SCHEMA_VERSION
+        );
     }
 
     #[test]
@@ -70,7 +74,8 @@ mod tests {
         }
         assert!(path.exists(), "库文件应已创建于 {}", path.display());
         // 二次打开不能报错（WAL 残留文件也要能处理）
-        let _conn = open(&path).expect("reopen");
+        let conn = open(&path).expect("reopen");
+        assert_eq!(schema::version(&conn).unwrap(), schema::SCHEMA_VERSION);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
