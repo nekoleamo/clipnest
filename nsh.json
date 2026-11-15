@@ -1,0 +1,17 @@
+{
+  "name": "clipnest",
+  "id": "com.example.clipnest",
+  "version": "1.0.0",
+  "build": 1,
+  "rust": ".",
+  "root": "App",
+  "window": {
+    "title": "clipnest",
+    "defaultSize": { "width": 420, "height": 320 },
+    "defaultVisible": false,
+    "closeOnPress": false
+  },
+  "macos": {
+    "activationPolicy": "accessory"
+  }
+}

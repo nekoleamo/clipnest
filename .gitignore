@@ -1,0 +1,16 @@
+# Rust
+/target
+**/*.rs.bk
+
+# nsh
+.nsh/
+
+# macOS
+.DS_Store
+*.app
+
+# 日志与临时产物
+*.log
+
+# codegraph 索引（本机生成）
+.codegraph/
