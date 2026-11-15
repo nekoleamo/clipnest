@@ -30,6 +30,8 @@ pub struct Settings {
     pub sensitive_apps: Vec<String>,
     /// 关掉就不按应用过滤（用户自担风险，自己用 `⌘E` 手动标)。
     pub ignore_sensitive_apps: bool,
+    /// 导出目录（空 = `~/Downloads`）。
+    pub export_dir: String,
 }
 
 impl Default for Settings {
@@ -39,6 +41,7 @@ impl Default for Settings {
             panel_height: 420,
             sensitive_apps: Vec::new(),
             ignore_sensitive_apps: true,
+            export_dir: String::new(),
         }
     }
 }

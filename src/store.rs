@@ -120,11 +120,19 @@ fn save_image(paths: &Paths, image: &ImageBytes) -> std::io::Result<NewItem> {
     if !origin.exists() {
         std::fs::write(&origin, &image.png)?;
     }
-    if !thumb.exists()
-        && let Err(e) = write_thumbnail(&image.png, &thumb)
-    {
-        // 缩略图失败不影响原图与入库（面板退化成显示尺寸）。
-        crate::logs::line(format!("THUMB ERROR {e}"));
+    if !thumb.exists() {
+        // 小图不缩：直接拷原图字节。让 `image` 重新编码反而可能更大
+        // （实测 128×128：AppKit 编码 3.8K，`image` 重编码 39K）。
+        let small = image.width.max(image.height) <= THUMBNAIL_MAX;
+        let result = if small {
+            std::fs::copy(&origin, &thumb).map(|_| ())
+        } else {
+            write_thumbnail(&image.png, &thumb)
+        };
+        if let Err(e) = result {
+            // 缩略图失败不影响原图与入库（面板退化成显示尺寸）。
+            crate::logs::line(format!("THUMB ERROR {e}"));
+        }
     }
     Ok(NewItem::image(
         name,
@@ -360,14 +368,39 @@ mod tests {
         assert!(origin.exists(), "原图要落盘");
         assert_eq!(std::fs::read(&origin).unwrap(), png, "原图字节不变");
         let t = image::open(&thumb).unwrap();
-        assert!(t.width().max(t.height()) <= THUMBNAIL_MAX, "缩略图要缩小");
+        assert!(t.width().max(t.height()) <= THUMBNAIL_MAX, "缩略图不超过上限");
         assert!(t.width() > 1, "缩略图不能缩成一条线");
+        // 640×480 > 320 → 真缩过，字节必然不同且更小
+        assert_ne!(std::fs::read(&origin).unwrap(), std::fs::read(&thumb).unwrap());
 
         // 同一张图再复制：只涨 use_count，不新增行、不重写文件
         let again = record_at(&paths, &conn, &cap).unwrap();
         assert!(matches!(again[0].result, UpsertResult::Deduped(_)));
         assert_eq!(items::count(&conn).unwrap(), 1);
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn small_image_thumbnail_is_not_reencoded() {
+        let root = std::env::temp_dir().join(format!("clipnest-store-tiny-{}", crate::model::now()));
+        let paths = Paths::from_root(&root);
+        let conn = db::open_memory().unwrap();
+        let png = png_of(64, 64, [0, 128, 255, 255]);
+        let cap = Captured {
+            image: Some(ImageBytes {
+                png: png.clone(),
+                width: 64,
+                height: 64,
+            }),
+            ..Default::default()
+        };
+        record_at(&paths, &conn, &cap).unwrap();
+        let item = items::get(&conn, 1).unwrap().unwrap();
+        let hash = item.content.strip_suffix(".png").unwrap();
+        let origin = std::fs::read(paths.image_origin(hash)).unwrap();
+        let thumb = std::fs::read(paths.image_thumbnail(hash)).unwrap();
+        assert_eq!(thumb, origin, "小图不该让 image 重编码（会更大）");
         let _ = std::fs::remove_dir_all(&root);
     }
 

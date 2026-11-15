@@ -213,6 +213,18 @@ pub fn write_back(item: &Item) -> Result<i64, String> {
     Ok(mark_self_write())
 }
 
+/// 把一批文件放到剪贴板（导出后调用：⌘V 到 Finder/微信就是粘文件）。
+pub fn put_files_on_clipboard(paths: &[String]) -> Result<i64, String> {
+    use clipboard_rs::{Clipboard, ClipboardContext};
+    if paths.is_empty() {
+        return Err("没有文件可放".to_owned());
+    }
+    let ctx = ClipboardContext::new().map_err(|e| format!("剪贴板不可用：{e}"))?;
+    ctx.set_files(paths.to_vec())
+        .map_err(|e| format!("放文件失败：{e}"))?;
+    Ok(mark_self_write())
+}
+
 /// 写回 + 隐藏面板后调用：延后 120 ms 发 ⌘V。
 ///
 /// 用独立线程睡，避免卡住 UI；P0 已验证从非 UI 线程发 CGEvent 有效。

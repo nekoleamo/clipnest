@@ -24,6 +24,7 @@ pub mod backup;
 pub mod clipboard;
 pub mod cursor;
 pub mod db;
+pub mod export;
 pub mod keys;
 pub mod logs;
 pub mod model;
@@ -103,6 +104,11 @@ pub fn toggle_panel() {
             focus_when_ready(0);
         }
     }
+}
+
+/// 重新把键盘焦点给面板（导出这类会短暂丢失前台的操作之后用）。
+pub fn focus_panel() {
+    focus_when_ready(0);
 }
 
 /// 打开设置窗。

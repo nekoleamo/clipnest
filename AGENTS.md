@@ -60,6 +60,12 @@ nsh package --target windows
 24. 响应式列表用 `each(rows, |r| r.id, …)`：静态 `children` 不刷新，`dynamic` 整块重建会把搜索框焦点搞丢。行渲染函数返回具体 `View`（`impl IntoElement` 会带出 `&Row` 生命周期，E0515）。
 25. 面板激活自己会抢走前台：粘贴流程 = 写回 → `dismiss()`（隐藏 + `NSRunningApplication::activate` 原应用）→ 120 ms → ⌘V；原应用 pid 在打开前用 `NSWorkspace.frontmostApplication()` 记。
 
+## 导出与剪贴板文件（P3 实测）
+
+1. **nsh 0.5.1 没有 drag-out**（只能接收 drop，也不暴露 NSView）：导出走「写文件 + `set_files` 放剪贴板」。
+2. **写剪贴板文件后前台会被抢回原应用**：面板还在但收不到键盘 → 导出成功后补一次 `focus_panel()`。
+3. **小图别让 `image` 重编码当缩略图**：128×128 的图 AppKit 编码 3.8K、`image` 重编码 39K（比原图还大）。只在最长边 > 320 时才真缩，否则拷原图字节。
+
 ## 开机自启与权限（P3 实测）
 
 1. **macOS 写完 LaunchAgent plist 不要 `launchctl load`**：`RunAtLoad` 会让它立刻再起一个实例（实测进程变 2 个）。只写文件，登录时 launchd 自己会加载。

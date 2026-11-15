@@ -260,6 +260,49 @@ pub fn toggle_flag(row: &Row, flag: Flag) -> Option<bool> {
     }
 }
 
+/// 导出当前条目成文件，并把文件放进剪贴板（拖拽的降级方案）。
+///
+/// `files` 条目不用导出：它们本来就在磁盘上，直接放进剪贴板。
+pub fn export(row: &Row) -> Option<String> {
+    let db = store::db()?;
+    let conn = db.lock().ok()?;
+    let item = db::items::get(&conn, row.id).ok()??;
+
+    let written = if item.kind == ItemKind::Files {
+        item.content
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    } else {
+        let dir = crate::export::dir(&crate::settings());
+        match crate::export::write(&item, &dir) {
+            Ok(path) => vec![path.display().to_string()],
+            Err(e) => {
+                logs::line(format!("EXPORT FAILED id={} {e}", item.id));
+                return None;
+            }
+        }
+    };
+
+    match crate::clipboard::put_files_on_clipboard(&written) {
+        Ok(cc) => {
+            logs::line(format!(
+                "EXPORT id={} files={} cc={cc}",
+                item.id,
+                written.join(",")
+            ));
+            // 写剪贴板文件后前台有时被抢回原应用，重新取一次键盘焦点。
+            crate::focus_panel();
+            written.first().cloned()
+        }
+        Err(e) => {
+            logs::line(format!("EXPORT clipboard failed id={} {e}", item.id));
+            None
+        }
+    }
+}
+
 /// 取当前选中的行。
 fn selected(rows: &Signal<Vec<Row>>, sel: &Signal<usize>) -> Option<Row> {
     rows.with(|r| r.get(sel.get()).cloned())
@@ -406,6 +449,14 @@ pub fn Panel() -> impl IntoElement {
                 && toggle_flag(&row, Flag::Sensitive).is_some()
             {
                 refresh(&rows_e, &sel_e, &q_e);
+            }
+        });
+
+        // ⌘O 导出成文件并放进剪贴板（拖拽导出的降级方案；导出后接着 ⌘V 就能粘文件）
+        let (rows_o, sel_o) = (rows, sel);
+        on_key_with("mod+o", arrows, move |_| {
+            if let Some(row) = selected(&rows_o, &sel_o) {
+                export(&row);
             }
         });
 

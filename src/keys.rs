@@ -12,7 +12,7 @@ mod platform {
     pub const SLOT_PREFIX: &str = "⌘";
     /// 面板底部的操作提示。
     pub const HINTS: &str =
-        "↑↓ 选择 · ⏎ 粘贴 · ⌘1-9 直贴 · ⌘D 删除 · ⌘P 置顶 · ⌘S 收藏 · ⌘E 敏感 · ⌘Y 复制";
+        "↑↓ 选择 · ⏎ 粘贴 · ⌘1-9 直贴 · ⌘D 删除 · ⌘P 置顶 · ⌘S 收藏 · ⌘E 敏感 · ⌘O 导出 · ⌘Y 复制";
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -20,7 +20,7 @@ mod platform {
     pub const HOTKEY: &str = "Ctrl+Shift+V";
     pub const SLOT_PREFIX: &str = "Ctrl+";
     pub const HINTS: &str =
-        "↑↓ 选择 · ⏎ 粘贴 · Ctrl+1-9 直贴 · Ctrl+D 删除 · Ctrl+P 置顶 · Ctrl+S 收藏 · Ctrl+E 敏感 · Ctrl+Y 复制";
+        "↑↓ 选择 · ⏎ 粘贴 · Ctrl+1-9 直贴 · Ctrl+D 删除 · Ctrl+P 置顶 · Ctrl+S 收藏 · Ctrl+E 敏感 · Ctrl+O 导出 · Ctrl+Y 复制";
 }
 
 pub use platform::{HINTS, HOTKEY, SLOT_PREFIX};
@@ -57,7 +57,7 @@ mod tests {
     /// HINTS 里的每个动作都要能对上真实绑定（防文案飘）。
     #[test]
     fn hints_mention_every_action() {
-        for word in ["直贴", "删除", "置顶", "收藏", "敏感", "复制"] {
+        for word in ["直贴", "删除", "置顶", "收藏", "敏感", "导出", "复制"] {
             assert!(HINTS.contains(word), "提示里缺 {word}");
         }
     }
