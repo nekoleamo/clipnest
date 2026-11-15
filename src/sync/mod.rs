@@ -127,6 +127,10 @@ pub struct SyncReport {
     pub pushed: usize,
     /// 从别的设备拉到并合并的变更条数。
     pub pulled: usize,
+    /// 上传的图片文件数。
+    pub blobs_pushed: usize,
+    /// 下载的图片文件数。
+    pub blobs_pulled: usize,
     /// 合并细节。
     pub applied: ApplyReport,
 }
@@ -178,10 +182,13 @@ impl Transport for LocalTransport {
     }
 
     fn put(&self, name: &str, bytes: &[u8]) -> Result<(), String> {
-        std::fs::create_dir_all(&self.root).map_err(|e| format!("建目录失败：{e}"))?;
-        let tmp = self.root.join(format!("{name}.tmp"));
+        let target = self.root.join(name);
+        if let Some(dir) = target.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("建目录失败：{e}"))?;
+        }
+        let tmp = target.with_extension("tmp");
         std::fs::write(&tmp, bytes).map_err(|e| format!("写 {name} 失败：{e}"))?;
-        std::fs::rename(&tmp, self.root.join(name)).map_err(|e| format!("改名失败：{e}"))
+        std::fs::rename(&tmp, &target).map_err(|e| format!("改名失败：{e}"))
     }
 
     fn remove(&self, name: &str) -> Result<(), String> {
@@ -431,6 +438,73 @@ fn set_last_export(conn: &Connection, at: &str) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// 图片在远端的位置：`blobs/<hash 前2位>/<hash>.png`（与本地分片一致，便于排查）。
+pub fn blob_path(hash: &str) -> String {
+    let shard = &hash[..2.min(hash.len())];
+    format!("blobs/{shard}/{hash}.png")
+}
+
+/// 把包里的图片原图传到远端；远端已有同一份（按 hash 命名）就是幂等覆盖。
+fn push_blobs(transport: &dyn Transport, changes: &[Change]) -> usize {
+    let paths = crate::paths();
+    let mut sent = 0;
+    for change in changes {
+        let Change::Upsert { item } = change else {
+            continue;
+        };
+        if item.kind != ItemKind::Image {
+            continue;
+        }
+        let hash = item.content.strip_suffix(".png").unwrap_or(&item.content);
+        let origin = paths.image_origin(hash);
+        let Ok(bytes) = std::fs::read(&origin) else {
+            crate::logs::line(format!("SYNC blob missing local: {hash}"));
+            continue;
+        };
+        match transport.put(&blob_path(hash), &bytes) {
+            Ok(()) => sent += 1,
+            Err(e) => crate::logs::line(format!("SYNC blob push failed {hash}: {e}")),
+        }
+    }
+    sent
+}
+
+/// 拉取包里本地还缺的图片原图（并顺手生成缩略图）。
+fn pull_blobs(transport: &dyn Transport, changes: &[Change]) -> usize {
+    let paths = crate::paths();
+    let mut got = 0;
+    for change in changes {
+        let Change::Upsert { item } = change else {
+            continue;
+        };
+        if item.kind != ItemKind::Image {
+            continue;
+        }
+        let hash = item.content.strip_suffix(".png").unwrap_or(&item.content);
+        let origin = paths.image_origin(hash);
+        if origin.exists() {
+            continue;
+        }
+        let Ok(bytes) = transport.get(&blob_path(hash)) else {
+            // 对端没传图（旧版本或传失败）：记录还在，缩略图退化成尺寸
+            crate::logs::line(format!("SYNC blob not on remote: {hash}"));
+            continue;
+        };
+        if let Err(e) = paths.ensure_image_dirs(hash) {
+            crate::logs::line(format!("SYNC blob dir failed {hash}: {e}"));
+            continue;
+        }
+        if let Err(e) = std::fs::write(&origin, &bytes) {
+            crate::logs::line(format!("SYNC blob write failed {hash}: {e}"));
+            continue;
+        }
+        let thumb = paths.image_thumbnail(hash);
+        let _ = crate::store::write_thumbnail(&bytes, &thumb);
+        got += 1;
+    }
+    got
+}
+
 /// 把本地增量推上去，再把别的设备的增量拉下来合并。
 ///
 /// `encode`/`decode` 由调用方给（加密在 `backup` 里）——传输层只见字节。
@@ -458,6 +532,7 @@ pub fn sync_round(
         let sealed = encode(&plain)?;
         transport.put(&format!("{device_id}.json"), &sealed)?;
         report.pushed = package.changes.len();
+        report.blobs_pushed = push_blobs(transport, &package.changes);
     }
     // 没有变更也要记时间点，否则下次会把老变更再发一遍。
     set_last_export(conn, &exported_at).map_err(|e| e.to_string())?;
@@ -486,6 +561,7 @@ pub fn sync_round(
         report.pulled += package.changes.len();
         let applied = apply_changes(conn, &package.changes).map_err(|e| e.to_string())?;
         report.applied.merge(applied);
+        report.blobs_pulled += pull_blobs(transport, &package.changes);
     }
 
     Ok(report)

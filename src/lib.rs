@@ -540,6 +540,21 @@ pub fn boot() {
             }
         }
 
+        // 自检：SPIKE_WEBDAV_PROBE=1 只探测 WebDAV 能不能连上（列目录），不写任何东西。
+        if std::env::var("SPIKE_WEBDAV_PROBE").is_ok() {
+            std::thread::spawn(|| {
+                let cfg = sync_config();
+                logs::line(format!("PROBE backend={}", cfg.backend.summary()));
+                match sync::backends::open(&cfg) {
+                    Ok(transport) => match transport.list() {
+                        Ok(files) => logs::line(format!("PROBE list OK files={files:?}")),
+                        Err(e) => logs::line(format!("PROBE list ERROR {e}")),
+                    },
+                    Err(e) => logs::line(format!("PROBE open ERROR {e}")),
+                }
+            });
+        }
+
         // 自检：SPIKE_SYNC=1 启动后 2 秒跑一轮同步（验证配置→后端→合并整条链路）。
         // 用普通线程而不是 `set_timeout`：`boot()` 不在响应式上下文里。
         if std::env::var("SPIKE_SYNC").is_ok() {

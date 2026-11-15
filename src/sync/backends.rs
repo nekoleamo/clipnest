@@ -23,16 +23,19 @@ pub fn open(config: &SyncConfig) -> Result<Box<dyn Transport>, String> {
             insecure_tls,
         } => {
             let base = format!("{}{}/", url.trim_end_matches('/'), remote_dir);
-            // 自签证书的 NAS 很常见，但 ureq 的 rustls 不做「跳过校验」的简单开关；
-            // 明说清楚比默默失败好。
             if *insecure_tls {
                 crate::logs::line(
-                    "SYNC insecure_tls 目前不生效：请给 NAS 装有效证书，或改用 local_dir（挂载网络盘）",
+                    "SYNC insecure_tls：不校验服务器证书（NAS 自签证书时才该打开）",
                 );
             }
             let password = crate::sync::secret::get(WEBDAV_SECRET_SERVICE, username)
                 .ok_or_else(|| "钥匙串里没有这个 WebDAV 账号的密码".to_owned())?;
-            Ok(Box::new(WebDavTransport::new(&base, username, &password)?))
+            Ok(Box::new(WebDavTransport::new(
+                &base,
+                username,
+                &password,
+                *insecure_tls,
+            )?))
         }
     }
 }
@@ -46,12 +49,30 @@ pub struct WebDavTransport {
 }
 
 impl WebDavTransport {
-    pub fn new(base: &str, username: &str, password: &str) -> Result<Self, String> {
+    /// `insecure_tls`：不校验服务器证书（群晖/飞牛这类 NAS 用自签证书时的必需品）。
+    pub fn new(
+        base: &str,
+        username: &str,
+        password: &str,
+        insecure_tls: bool,
+    ) -> Result<Self, String> {
         if !base.starts_with("http://") && !base.starts_with("https://") {
             return Err("WebDAV 地址要以 http:// 或 https:// 开头".to_owned());
         }
+        let agent = if insecure_tls {
+            let tls = ureq::tls::TlsConfig::builder()
+                .disable_verification(true)
+                .build();
+            ureq::Agent::new_with_config(
+                ureq::Agent::config_builder()
+                    .tls_config(tls)
+                    .build(),
+            )
+        } else {
+            ureq::Agent::new_with_defaults()
+        };
         Ok(Self {
-            agent: ureq::Agent::new_with_defaults(),
+            agent,
             base: base.to_owned(),
             authorization: format!(
                 "Basic {}",
@@ -140,12 +161,34 @@ impl Transport for WebDavTransport {
     }
 
     fn put(&self, name: &str, bytes: &[u8]) -> Result<(), String> {
+        let url = self.url(name);
+        let body = bytes.to_vec();
         let (status, _) = self.request(
             "PUT",
-            &self.url(name),
+            &url,
             &[("Content-Type", "application/octet-stream")],
-            bytes.to_vec(),
+            body.clone(),
         )?;
+        // 子目录（`blobs/1a/`）可能还不存在：409/404 先 MKCOL 再重试一次。
+        if status == 409 || status == 404 {
+            let mut parent = self.base.clone();
+            let parts: Vec<&str> = name.split('/').collect();
+            for dir in &parts[..parts.len().saturating_sub(1)] {
+                parent.push_str(dir);
+                parent.push('/');
+                let _ = self.request("MKCOL", parent.trim_end_matches('/'), &[], Vec::new());
+            }
+            let (retry, _) = self.request(
+                "PUT",
+                &url,
+                &[("Content-Type", "application/octet-stream")],
+                body,
+            )?;
+            if retry >= 400 {
+                return Err(format!("上传 {name} 失败（HTTP {retry}）"));
+            }
+            return Ok(());
+        }
         if status >= 400 {
             return Err(format!("上传 {name} 失败（HTTP {status}）"));
         }
@@ -265,10 +308,14 @@ mod tests {
 
     #[test]
     fn webdav_requires_a_url_scheme() {
-        let err = WebDavTransport::new("nas.local/clipnest/", "me", "pw")
+        let err = WebDavTransport::new("nas.local/clipnest/", "me", "pw", false)
             .err()
             .expect("应该报错");
         assert!(err.contains("http"), "{err}");
-        assert!(WebDavTransport::new("https://nas.local/clipnest/", "me", "pw").is_ok());
+        assert!(WebDavTransport::new("https://nas.local/clipnest/", "me", "pw", false).is_ok());
+        assert!(
+            WebDavTransport::new("https://192.168.1.2:5006/clipnest/", "me", "pw", true).is_ok(),
+            "自签证书：insecure_tls 也要能建"
+        );
     }
 }

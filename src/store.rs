@@ -142,7 +142,7 @@ fn save_image(paths: &Paths, image: &ImageBytes) -> std::io::Result<NewItem> {
 }
 
 /// 生成缩略图（等比缩到 [`THUMBNAIL_MAX`] 以内）。
-fn write_thumbnail(png: &[u8], to: &std::path::Path) -> std::io::Result<()> {
+pub(crate) fn write_thumbnail(png: &[u8], to: &std::path::Path) -> std::io::Result<()> {
     let img = image::load_from_memory(png).map_err(std::io::Error::other)?;
     let small = img.thumbnail(THUMBNAIL_MAX, THUMBNAIL_MAX);
     small
