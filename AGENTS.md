@@ -28,6 +28,10 @@ nsh test
 9. **`lib.rs` 必须有 `#[native_module("<app>/native")]`**，否则打包时 describe bin 编译失败。
 10. **产物体积固定约 50 MB**：`nsh-cli` 生成的 runner 硬编码 8 个 features，`default-features = false` 无效。
 
+## 代码检索
+
+本仓库已有 `.codegraph/` 索引（codegraph 1.6.2）。改代码前优先走 codegraph MCP（`codegraph_explore`，传 `projectPath=/Users/nekoleamo/Documents/Working/clipnest`），不要逐个 grep/read。改动较大后重建：`codegraph init`（增量）或 `codegraph status` 查是否过期。
+
 ## 代码约定
 
 - 注释、文档一律中文
