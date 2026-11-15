@@ -25,7 +25,7 @@
 
 ```bash
 # 注意：PATH 里必须优先 homebrew 的 cargo（~/.local/bin/cargo 是个空壳 shim）
-export PATH=/opt/homebrew/bin:$PATH
+source "$HOME/.cargo/env"        # rustup 工具链（brew rust 已卸载）
 
 cargo check                                  # 类型检查
 nsh package --target macos                   # 打包 → .nsh/out/clipnest.app

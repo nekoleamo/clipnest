@@ -11,7 +11,7 @@
 ## 构建
 
 ```bash
-export PATH=/opt/homebrew/bin:$PATH   # ~/.local/bin/cargo 是空壳 shim，会让打包失败
+source "$HOME/.cargo/env"   # rustup；brew rust 与假 cargo shim 均已移除
 cargo check
 nsh package --target macos
 nsh test
