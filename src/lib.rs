@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
+pub mod backup;
 pub mod db;
 pub mod model;
 
