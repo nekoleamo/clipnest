@@ -129,6 +129,11 @@ notepad.exe
 结论：通过 / 部分通过（缺 XX）/ 不成立
 ```
 
+## 附：逐项能力对照
+
+P5 的完整对照表（19 项能力 × 平台实现 × 验证状态）在 `docs/windows-能力对照.md`，
+冒烟时按那份表的「真机上要重点看的」四条走。
+
 ## 附：app_id
 
 `nsh.json` 里 `app_id` 现在是占位的 `com.example.clipnest`，Windows 上会影响任务栏分组与单实例；冒烟时如果出现「第二个实例又开一个托盘图标」，就是 `single_instance` 没配上，先改 app_id 再复测。

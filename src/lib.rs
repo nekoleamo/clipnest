@@ -421,9 +421,14 @@ fn focus_when_ready(attempt: u32) {
             });
             spawn(async move {
                 let focused = answer.await.unwrap_or(false);
-                if !focused {
-                    focus_when_ready(attempt + 1);
+                if focused {
+                    return;
                 }
+                // Windows 上窗口没拿到前台就收不到键盘：主动抢一次（可能被前台锁拒绝）。
+                if !clipboard::claim_foreground() {
+                    logs::line(format!("PANEL 抢前台失败，重试 {attempt}"));
+                }
+                focus_when_ready(attempt + 1);
             });
         },
     );

@@ -332,6 +332,51 @@ pub fn return_to_previous_app() -> bool {
     false
 }
 
+/// Windows：把自己的顶层窗口抢回前台。
+///
+/// Windows 上「能收键盘」= 必须是前台窗口，而 nsh 的 `activate` 只做
+/// `ShowWindow(SW_SHOW)`，不一定拿到前台。这里是兜底：枚举本进程的可见顶层窗口，
+/// 调 `SetForegroundWindow`（系统可能拒绝——有前台锁，那就只记日志）。
+#[cfg(target_os = "windows")]
+pub fn claim_foreground() -> bool {
+    use std::sync::atomic::{AtomicIsize, Ordering};
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowThreadProcessId, IsWindowVisible, SetForegroundWindow,
+    };
+
+    static FOUND: AtomicIsize = AtomicIsize::new(0);
+
+    unsafe extern "system" fn pick(hwnd: HWND, _lparam: LPARAM) -> windows_sys::core::BOOL {
+        let mut pid = 0u32;
+        // SAFETY: 只读查询。
+        unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+        if pid == std::process::id() && unsafe { IsWindowVisible(hwnd) } != 0 {
+            FOUND.store(hwnd as isize, Ordering::SeqCst);
+            return 0; // 找到就停
+        }
+        1
+    }
+
+    FOUND.store(0, Ordering::SeqCst);
+    // SAFETY: 回调是 extern "system"，只碰原子量。
+    let _ = unsafe { EnumWindows(Some(pick), 0) };
+    let hwnd = FOUND.load(Ordering::SeqCst);
+    if hwnd == 0 {
+        crate::logs::line("FOREGROUND no own window found");
+        return false;
+    }
+    // SAFETY: 句柄来自 EnumWindows，此刻仍有效。
+    let ok = unsafe { SetForegroundWindow(hwnd as HWND) } != 0;
+    crate::logs::line(format!("FOREGROUND claim hwnd={hwnd} ok={ok}"));
+    ok
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn claim_foreground() -> bool {
+    true
+}
+
 /// 诊断用：当前 key window 与 app 是否 active。
 ///
 /// P0 记录的「面板能打字」依赖窗口成为 key window；这条日志用来在实测里确认。

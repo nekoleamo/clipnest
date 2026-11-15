@@ -38,12 +38,17 @@ pub fn panel_origin(width: f32, height: f32) -> Option<(f32, f32)> {
 }
 
 /// Windows：`GetCursorPos` + 该点所在显示器的工作区（已扣掉任务栏）。
+///
+/// **坐标单位**：Win32 的 `GetCursorPos` / `rcWork` 都是**物理像素**，而 nsh 的
+/// `WindowRef::set_bounds` 收的是**逻辑点**（内部再乘 DPI/96 换算）。所以这里必须
+/// 按该显示器的 scale 除一遍，否则 125%/150% 缩放下面板会跑偏。
 #[cfg(target_os = "windows")]
 pub fn panel_origin(width: f32, height: f32) -> Option<(f32, f32)> {
     use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint,
     };
+    use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
     use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
     let mut p = POINT { x: 0, y: 0 };
@@ -59,15 +64,19 @@ pub fn panel_origin(width: f32, height: f32) -> Option<(f32, f32)> {
         if GetMonitorInfoW(monitor, &mut info) == 0 {
             return None;
         }
+        // 拿这块屏的 DPI；失败就按 100% 算，不至于摆错位置。
+        let (mut dx, mut dy) = (96u32, 96u32);
+        let _ = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dx, &mut dy);
+        let scale = if dx == 0 { 1.0 } else { f64::from(dx) / 96.0 };
+
         let r = info.rcWork;
-        Some(center(
-            f64::from(r.left),
-            f64::from(r.top),
-            f64::from(r.right - r.left),
-            f64::from(r.bottom - r.top),
-            width,
-            height,
-        ))
+        let (x, y, w, h) = (
+            f64::from(r.left) / scale,
+            f64::from(r.top) / scale,
+            f64::from(r.right - r.left) / scale,
+            f64::from(r.bottom - r.top) / scale,
+        );
+        Some(center(x, y, w, h, width, height))
     }
 }
 

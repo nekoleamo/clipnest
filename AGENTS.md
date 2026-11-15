@@ -66,6 +66,13 @@ nsh package --target windows
 2. **写剪贴板文件后前台会被抢回原应用**：面板还在但收不到键盘 → 导出成功后补一次 `focus_panel()`。
 3. **小图别让 `image` 重编码当缩略图**：128×128 的图 AppKit 编码 3.8K、`image` 重编码 39K（比原图还大）。只在最长边 > 320 时才真缩，否则拷原图字节。
 
+## Windows 侧（P5）
+
+1. **Win32 是物理像素，nsh 的 `set_bounds` 要逻辑点**：`GetCursorPos`/`rcWork` 的坐标要除 `GetDpiForMonitor/96`，否则高 DPI 下面板跑偏。
+2. **nsh 的 `activate` 在 Windows 上只做 `ShowWindow(SW_SHOW)`**，不保证前台；收键盘要靠 `SetForegroundWindow`（`clipboard::claim_foreground()` 用 `EnumWindows` 找本进程窗口）。
+3. `clipboard-rs` 在 Windows 上走 `CF_DIB`/`CF_DIBV5` + `BmpDecoder`，`image` 的 `bmp` feature 必须开（截图工具的 Win+Shift+S 只写 DIB）。
+4. 单实例靠 `nsh.json` 的 `"singleInstance": true`（命名互斥量），否则双开会有两个托盘图标。
+
 ## 同步（P4 实测）
 
 1. **`sync.json` 独立于 `settings.json`**，口令一律进系统钥匙串；配置文件里出现密码就是 bug。

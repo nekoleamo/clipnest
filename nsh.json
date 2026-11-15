@@ -7,11 +7,15 @@
   "root": "App",
   "window": {
     "title": "clipnest",
-    "defaultSize": { "width": 420, "height": 320 },
+    "defaultSize": {
+      "width": 420,
+      "height": 320
+    },
     "defaultVisible": false,
     "closeOnPress": false
   },
   "macos": {
     "activationPolicy": "accessory"
-  }
+  },
+  "singleInstance": true
 }
