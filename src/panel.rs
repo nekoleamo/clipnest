@@ -471,6 +471,7 @@ pub fn Panel() -> impl IntoElement {
         .gap_2()
         .p_2()
         .bg(move || theme().background)
+        .child(ax_banner())
         .child(field)
         .child(
             scroll()
@@ -590,6 +591,45 @@ fn row_view(row: &Row, index: usize, sel: Signal<usize>) -> View {
                 ),
         )
         .child(view().opacity(0.0).child(text(format!("{id}"))))
+}
+
+/// 没有辅助功能权限时的提示条（Windows 上恒有权限，不显示）。
+fn ax_banner() -> View {
+    if crate::clipboard::ax_trusted() {
+        return view().h(px(0.0));
+    }
+    view()
+        .flex()
+        .items_center()
+        .gap_2()
+        .px_2()
+        .py_1()
+        .rounded_md()
+        .bg(move || theme().muted)
+        .child(
+            text("没有辅助功能权限：回车不会自动粘贴")
+                .text_size(px(10.0))
+                .text_color(move || theme().destructive),
+        )
+        .child(
+            view()
+                .px_2()
+                .py_1()
+                .rounded_sm()
+                .bg(move || theme().background)
+                .on_press(|_: &()| {
+                    logs::line("AX open settings");
+                    // 结果不重要：系统要么打开设置页，要么不响应。
+                    drop(open_url(
+                        "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+                    ));
+                })
+                .child(
+                    text("打开设置")
+                        .text_size(px(10.0))
+                        .text_color(move || theme().foreground),
+                ),
+        )
 }
 
 /// 图片条目的缩略图（28pt 方形，没有就占位不画）。

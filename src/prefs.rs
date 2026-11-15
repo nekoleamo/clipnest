@@ -135,6 +135,40 @@ pub fn Prefs() -> impl IntoElement {
             .text_color(move || theme().secondary_foreground),
         );
 
+    // 开机自启：写/删 LaunchAgent（macOS）或注册表 Run 键（Windows）。
+    let auto_on = signal(crate::autostart::is_enabled());
+    let note_auto = note;
+    let auto_toggle = view()
+        .px_3()
+        .py_1()
+        .rounded_md()
+        .bg(move || theme().secondary)
+        .on_press(move |_: &()| {
+            let on = !auto_on.get();
+            match crate::autostart::set_enabled(on) {
+                Ok(()) => {
+                    auto_on.set(crate::autostart::is_enabled());
+                    note_auto.set(if on {
+                        "已设置开机自启（下次登录生效）".to_owned()
+                    } else {
+                        "已取消开机自启".to_owned()
+                    });
+                }
+                Err(e) => note_auto.set(format!("设置失败：{e}")),
+            }
+        })
+        .child(
+            text(move || {
+                if auto_on.get() {
+                    "已开启（点我关掉）"
+                } else {
+                    "已关闭（点我开启）"
+                }
+            })
+            .text_size(px(11.0))
+            .text_color(move || theme().secondary_foreground),
+        );
+
     let sens_count = crate::sensitive::list(&crate::settings()).len();
     let dir = crate::paths().root().display().to_string();
 
@@ -179,6 +213,12 @@ pub fn Prefs() -> impl IntoElement {
                     "{} 个内置应用（密码管理器/钥匙串）；名单可在 settings.json 的 sensitive_apps 里改",
                     sens_count
                 ))),
+        )
+        .child(
+            row()
+                .child(label("开机自启"))
+                .child(auto_toggle)
+                .child(hint("登录后自动启动，不弹窗")),
         )
         .child(
             row()

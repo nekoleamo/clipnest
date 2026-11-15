@@ -60,6 +60,11 @@ nsh package --target windows
 24. 响应式列表用 `each(rows, |r| r.id, …)`：静态 `children` 不刷新，`dynamic` 整块重建会把搜索框焦点搞丢。行渲染函数返回具体 `View`（`impl IntoElement` 会带出 `&Row` 生命周期，E0515）。
 25. 面板激活自己会抢走前台：粘贴流程 = 写回 → `dismiss()`（隐藏 + `NSRunningApplication::activate` 原应用）→ 120 ms → ⌘V；原应用 pid 在打开前用 `NSWorkspace.frontmostApplication()` 记。
 
+## 开机自启与权限（P3 实测）
+
+1. **macOS 写完 LaunchAgent plist 不要 `launchctl load`**：`RunAtLoad` 会让它立刻再起一个实例（实测进程变 2 个）。只写文件，登录时 launchd 自己会加载。
+2. 辅助功能权限用 `AXIsProcessTrusted()`；没授权时面板顶部给提示 + 跳系统设置（`x-apple.systempreferences:…Privacy_Accessibility`）。自检可用 `SPIKE_NO_AX=1` 伪造。
+
 ## 列表与过滤（P3 实测）
 
 1. **`each(rows, |r| r.id, …)` 的 key 要带上影响显示的字段**：只用 id 时，改置顶/收藏/敏感不会重画（行内容是一次性快照），要把 `(id, pinned, favorite, sensitive, summary, time)` 都放进 key。

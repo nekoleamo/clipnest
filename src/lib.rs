@@ -19,6 +19,7 @@ use nsh_core::desktop::{WindowAttributes, WindowFrame, WindowKind};
 use nsh_core::element::desktop::{WindowRef, current_window, register_global_shortcut, window};
 use nsh_core::prelude::*;
 
+pub mod autostart;
 pub mod backup;
 pub mod clipboard;
 pub mod cursor;
@@ -425,6 +426,19 @@ pub fn boot() {
             store::db_path().display(),
             store::count()
         ));
+        // 自检：SPIKE_AUTOSTART=on|off 直接验证 LaunchAgent/注册表那条路。
+        if let Ok(v) = std::env::var("SPIKE_AUTOSTART") {
+            let on = v != "off";
+            match autostart::set_enabled(on) {
+                Ok(()) => logs::line(format!(
+                    "AUTOSTART set={on} now={} path={:?}",
+                    autostart::is_enabled(),
+                    autostart::plist_path()
+                )),
+                Err(e) => logs::line(format!("AUTOSTART ERROR {e}")),
+            }
+        }
+
         start_watcher();
 
         // 启动时按设置清理一次（上限改了以后下次启动补偿）。

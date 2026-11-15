@@ -384,6 +384,10 @@ pub fn change_count() -> i64 {
 /// 辅助功能授权状态（自动粘贴 CGEvent 的前置条件）。
 #[cfg(target_os = "macos")]
 pub fn ax_trusted() -> bool {
+    // 自检：SPIKE_NO_AX=1 假装没授权，用来验面板的权限提示条。
+    if std::env::var("SPIKE_NO_AX").is_ok() {
+        return false;
+    }
     #[link(name = "ApplicationServices", kind = "framework")]
     unsafe extern "C" {
         fn AXIsProcessTrusted() -> bool;
