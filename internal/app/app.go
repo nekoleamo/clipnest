@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -106,6 +107,16 @@ func (a *App) invalidate() {
 		w.Invalidate()
 	}
 }
+
+// quitting 表示已经进入退出流程：此时窗口的 OnClose 不该再 PreventDefault，
+// 否则 mygo 的 prepareQuit 会因为「窗口关不掉」取消整个退出。
+var quitting atomic.Bool
+
+// MarkQuitting 在 OnBeforeQuit 里调用。
+func (a *App) MarkQuitting() { quitting.Store(true) }
+
+// Quitting 报告是否正在退出。
+func (a *App) Quitting() bool { return quitting.Load() }
 
 // SetReady 在窗口建好之后调用：之后才允许触发重画。
 func (a *App) SetReady() {

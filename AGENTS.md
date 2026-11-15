@@ -62,7 +62,8 @@ docs/            路线图、执行计划、验证记录
 11. **`WhenReady` 回调里调 `Window.Invalidate()` 会死锁**：该回调早于事件循环，向主线程投递的调用等不到回应。用 `App.SetReady()` 置位后才允许重画（`internal/app/app.go` 的 `invalidate`）
 12. `Clipboard.OnChanged` 的回调可能并发投递 → 采集必须加锁（`App.Capture` 的 `captureMu`），否则两个回调同时入库会撞 `content_hash` 唯一键
 13. 单实例靠 `mygo.App.RequestSingleInstanceLock()`（不返回则直接 `return`）+ `OnSecondInstance(func(args, cwd){ a.Show() })`
-14. 打包：`go get -tool github.com/egoist/mygo/cmd/mygo` 后 `go tool mygo build`，配置在 `mygo.json`（native UI 项目不用 TS 配置）
+14. **面板 `OnClose` 里无条件 `PreventDefault` 会让 `App.Quit()` 静默失败**：`prepareQuit` 会关所有窗口，关不掉就取消退出。要在 `OnBeforeQuit` 里置「正在退出」标志，退出流程中跳过 PreventDefault
+15. 打包：`go get -tool github.com/egoist/mygo/cmd/mygo` 后 `go tool mygo build`，配置在 `mygo.json`（native UI 项目不用 TS 配置）
 
 ## 每轮收尾
 

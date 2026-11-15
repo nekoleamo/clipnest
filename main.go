@@ -46,6 +46,8 @@ func main() {
 	// 常驻应用：没有 Dock 图标，也没有菜单栏（macOS accessory）
 	mygo.App.SetActivationPolicy(mygo.ActivationPolicyAccessory)
 	mygo.App.OnWindowAllClosed(func() {}) // 关掉最后一个窗口不退出
+	// 退出流程要先把「正在退出」标上：面板的 OnClose 靠它决定要不要 PreventDefault
+	mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) { a.MarkQuitting() })
 
 	mygo.App.WhenReady(func() {
 		// 面板：NSPanel 非激活样式，抢键盘但不抢前台
@@ -61,6 +63,9 @@ func main() {
 		})
 		// 关闭（Esc / ⌘W）当隐藏，下次唤起不用重建
 		panel.OnClose(func(e *mygo.CloseEvent) {
+			if a.Quitting() {
+				return // 退出流程里要真的关掉，否则 Quit 会被取消
+			}
 			e.PreventDefault()
 			panel.Hide()
 		})
