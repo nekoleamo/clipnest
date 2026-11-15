@@ -60,6 +60,11 @@ nsh package --target windows
 24. 响应式列表用 `each(rows, |r| r.id, …)`：静态 `children` 不刷新，`dynamic` 整块重建会把搜索框焦点搞丢。行渲染函数返回具体 `View`（`impl IntoElement` 会带出 `&Row` 生命周期，E0515）。
 25. 面板激活自己会抢走前台：粘贴流程 = 写回 → `dismiss()`（隐藏 + `NSRunningApplication::activate` 原应用）→ 120 ms → ⌘V；原应用 pid 在打开前用 `NSWorkspace.frontmostApplication()` 记。
 
+## 多屏与平台 API（P3 实测）
+
+1. **`nsh_core::element::desktop::displays()` 不能在 `run_on_main_thread` 回调里调用**：它读 nsh 的响应式环境，会 panic（`no reactive runtime`）。要屏幕信息就自己问系统（macOS `NSScreen`、Windows `MonitorFromPoint`），只把算好的坐标交给 `WindowRef::set_bounds`。
+2. macOS `NSScreen.frame` 是左下原点、y 向上；nsh 的屏幕坐标是左上原点、y 向下，换算 `top = 主屏高度 - (frame.y + frame.height)`。
+
 ## 图片（P3 实测）
 
 1. **`clipboard-rs` 的 `image` 只开 `png`/`jpeg` 解码**：macOS 截图常只给 TIFF，`get_image()` 会失败。兜底走 AppKit 重编码（`NSImage → NSBitmapImageRep → representationUsingType(PNG)`），别指望 `image` crate 解 NSImage 出的 TIFF。

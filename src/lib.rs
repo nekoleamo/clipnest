@@ -21,6 +21,7 @@ use nsh_core::prelude::*;
 
 pub mod backup;
 pub mod clipboard;
+pub mod cursor;
 pub mod db;
 pub mod keys;
 pub mod logs;
@@ -288,11 +289,22 @@ fn focus_when_ready(attempt: u32) {
             // 别的线程跑（实测 `MainThreadMarker::new()` 为 None），从非主线程
             // 调 AppKit 的 makeKeyAndOrderFront 是空操作——面板收不到键盘。
             let answer = run_on_main_thread(move || {
+                // 多屏：先摆到鼠标所在那块屏的中央，再抢 key。
+                let size = settings();
+                let at = cursor::panel_origin(settings::PANEL_WIDTH as f32, size.panel_height as f32);
                 PANEL.with(|slot| {
                     if let Some(panel) = slot.borrow().as_ref() {
+                        if let Some((x, y)) = at {
+                            panel.set_bounds(WindowFrame {
+                                x: Some(px(x)),
+                                y: Some(px(y)),
+                                ..Default::default()
+                            });
+                        }
                         panel.focus();
                     }
                 });
+                logs::line(format!("PANEL at={at:?}"));
                 let state = clipboard::key_window_state();
                 logs::line(format!("PANEL focus try={attempt} {state}"));
                 // 成了就停：面板成为 key window 后才能收键盘。
