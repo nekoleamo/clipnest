@@ -347,3 +347,6 @@ func maxInt(a, b int) int {
 var Logf = func(format string, args ...any) {}
 
 func logf(format string, args ...any) { Logf(format, args...) }
+
+// WriteThumbnail 生成缩略图（同步拉回图片后重建用）。
+func WriteThumbnail(pngBytes []byte, to string) error { return writeThumbnail(pngBytes, to) }

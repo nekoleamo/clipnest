@@ -1,0 +1,11 @@
+{
+  "name": "clipnest",
+  "slug": "clipnest",
+  "identifier": "com.clipnest.app",
+  "version": "1.0.0",
+  "copyright": "© 2026 clipnest",
+  "publisher": "clipnest",
+  "license": "MIT",
+  "main": ".",
+  "out": "dist"
+}
