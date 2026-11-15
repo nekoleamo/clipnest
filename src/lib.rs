@@ -34,6 +34,7 @@ pub mod prefs;
 pub mod sensitive;
 pub mod settings;
 pub mod store;
+pub mod sync;
 pub mod tray;
 
 /// 供打包器/TSX 侧引用的模块注册（`nsh.json` 的 `"rust"`）。
@@ -54,6 +55,10 @@ static PREFS: OnceLock<Signal<bool>> = OnceLock::new();
 
 /// 托盘只挂一次（可能有两个窗口各自渲染 App，用 static 而不是 thread_local）。
 static TRAY_ATTACHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+static SYNC_CONFIG: OnceLock<std::sync::Mutex<sync::config::SyncConfig>> = OnceLock::new();
+/// 最近一次同步的结果（UI 每隔几百毫秒读一次）。
+static SYNC_STATUS: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
 static PATHS: OnceLock<paths::Paths> = OnceLock::new();
 static SETTINGS: OnceLock<std::sync::Mutex<settings::Settings>> = OnceLock::new();
@@ -84,6 +89,87 @@ pub fn save_settings(next: settings::Settings) -> bool {
         *guard = s;
     }
     true
+}
+
+/// 当前同步配置。
+pub fn sync_config() -> sync::config::SyncConfig {
+    SYNC_CONFIG
+        .get_or_init(|| std::sync::Mutex::new(sync::config::SyncConfig::load(paths())))
+        .lock()
+        .map(|c| c.clone())
+        .unwrap_or_default()
+}
+
+/// 存同步配置（越界的字段先规范化）。
+pub fn save_sync_config(next: sync::config::SyncConfig) -> bool {
+    let c = next.normalized();
+    if let Err(e) = c.save(paths()) {
+        logs::line(format!("SYNC 配置写入失败：{e}"));
+        return false;
+    }
+    let cell = SYNC_CONFIG.get_or_init(|| std::sync::Mutex::new(c.clone()));
+    if let Ok(mut guard) = cell.lock() {
+        *guard = c;
+    }
+    true
+}
+
+/// 最近一次同步的状态文字。
+pub fn sync_status() -> String {
+    SYNC_STATUS
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default()
+}
+
+/// 现在跑一轮同步（在后台线程里，UI 不卡）。
+pub fn start_sync() {
+    let config = sync_config();
+    if let Err(e) = config.ready() {
+        set_sync_status(format!("⚠️ {e}"));
+        return;
+    }
+    set_sync_status("同步中…".to_owned());
+    std::thread::spawn(move || {
+        let Some(db) = store::db() else {
+            set_sync_status("❌ 数据库打不开".to_owned());
+            return;
+        };
+        let Ok(conn) = db.lock() else {
+            set_sync_status("❌ 数据库被占用".to_owned());
+            return;
+        };
+        match sync::run_once(&conn, &config) {
+            Ok(report) => {
+                logs::line(format!(
+                    "SYNC ok pushed={} pulled={} +{} ~{} -{}",
+                    report.pushed,
+                    report.pulled,
+                    report.applied.inserted,
+                    report.applied.updated,
+                    report.applied.deleted
+                ));
+                set_sync_status(format!(
+                    "✅ {} 推送 / {} 拉取（新增 {}、更新 {}、删除 {}）",
+                    report.pushed,
+                    report.pulled,
+                    report.applied.inserted,
+                    report.applied.updated,
+                    report.applied.deleted
+                ));
+            }
+            Err(e) => {
+                logs::line(format!("SYNC ERROR {e}"));
+                set_sync_status(format!("❌ {e}"));
+            }
+        }
+    });
+}
+
+fn set_sync_status(text: String) {
+    if let Ok(mut s) = SYNC_STATUS.lock() {
+        *s = text;
+    }
 }
 
 /// 退出应用（托盘菜单用）。
@@ -272,7 +358,7 @@ pub fn App() -> impl IntoElement {
             window()
                 .id("prefs")
                 .kind(WindowKind::Dialog)
-                .default_size(size(px(540.0), px(340.0)))
+                .default_size(size(px(620.0), px(720.0)))
                 .open(prefs_open)
                 .on_open_change(move |e| {
                     if prefs_open.get() != e.open {
@@ -443,6 +529,24 @@ pub fn boot() {
                 )),
                 Err(e) => logs::line(format!("AUTOSTART ERROR {e}")),
             }
+        }
+
+        // 自检：SPIKE_SYNC_SECRET=<口令> 把同步口令写进钥匙串（避免命令行明文留在 ps 里）。
+        if let Ok(secret) = std::env::var("SPIKE_SYNC_SECRET") {
+            let device = sync_config().device_name;
+            match sync::secret::set(sync::config::SECRET_SERVICE, &device, &secret) {
+                Ok(()) => logs::line(format!("SYNC secret set for {device}")),
+                Err(e) => logs::line(format!("SYNC secret ERROR {e}")),
+            }
+        }
+
+        // 自检：SPIKE_SYNC=1 启动后 2 秒跑一轮同步（验证配置→后端→合并整条链路）。
+        // 用普通线程而不是 `set_timeout`：`boot()` 不在响应式上下文里。
+        if std::env::var("SPIKE_SYNC").is_ok() {
+            std::thread::spawn(|| {
+                std::thread::sleep(Duration::from_secs(2));
+                start_sync();
+            });
         }
 
         start_watcher();

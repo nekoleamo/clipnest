@@ -237,6 +237,20 @@ fn apply(conn: &Connection, payload: &Payload) -> Result<ImportReport> {
     Ok(report)
 }
 
+/// 加/解密函数的签名（同步载荷复用）。
+pub type Coder = Box<dyn Fn(&[u8]) -> std::result::Result<Vec<u8>, String>>;
+
+/// 用口令做一对「加/解密」函数，给同步载荷复用同一套原语。
+///
+/// 每一轮同步最多各调一次，argon2id 的几十毫秒可以接受；
+/// 想省这次派生就在上层缓存 key（P4 接 WebDAV 时再看）。
+pub fn sealer(passphrase: String) -> (Coder, Coder) {
+    let seal_key = passphrase.clone();
+    let seal: Coder = Box::new(move |plain: &[u8]| seal(plain, &seal_key).map_err(|e| e.to_string()));
+    let open: Coder = Box::new(move |blob: &[u8]| open(blob, &passphrase).map_err(|e| e.to_string()));
+    (seal, open)
+}
+
 fn derive_key(passphrase: &str, salt: &[u8]) -> Result<[u8; KEY_LEN]> {
     let argon = argon2::Argon2::default();
     let mut key = [0u8; KEY_LEN];
@@ -486,6 +500,20 @@ mod tests {
         let report = import_bytes(&dst, &blob, "pw").unwrap();
         assert_eq!(report, ImportReport::default());
         assert_eq!(items::count(&dst).unwrap(), 0);
+    }
+
+    /// 同步载荷复用这套加密：密文里看不到明文，解密能还原。
+    #[test]
+    fn sealer_round_trips_and_hides_plaintext() {
+        let (seal, open) = sealer("同步口令".to_owned());
+        let plain = r#"{"content":"银河系"}"#.as_bytes();
+        let sealed = seal(plain).unwrap();
+        assert!(sealed.starts_with(MAGIC));
+        assert!(!String::from_utf8_lossy(&sealed).contains("银河系"));
+        assert_eq!(open(&sealed).unwrap(), plain.to_vec());
+        // 错口令要报错，不 panic
+        let (_s, wrong) = sealer("另一个口令".to_owned());
+        assert!(wrong(&sealed).is_err());
     }
 
     #[test]

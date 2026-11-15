@@ -24,6 +24,8 @@ use std::path::{Path, PathBuf};
 pub const DB_FILE: &str = "clipnest.db";
 /// 设置文件名。
 pub const SETTINGS_FILE: &str = "settings.json";
+/// 同步配置文件（独立于 settings.json，便于开源时单独给模板）。
+pub const SYNC_FILE: &str = "sync.json";
 
 /// 应用全部可写状态的根。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,6 +57,10 @@ impl Paths {
 
     pub fn settings(&self) -> PathBuf {
         self.root.join(SETTINGS_FILE)
+    }
+
+    pub fn sync_config(&self) -> PathBuf {
+        self.root.join(SYNC_FILE)
     }
 
     pub fn backups_dir(&self) -> PathBuf {
@@ -176,6 +182,7 @@ mod tests {
         let p = Paths::from_root("/tmp/x");
         assert_eq!(p.db(), Path::new("/tmp/x/clipnest.db"));
         assert_eq!(p.settings(), Path::new("/tmp/x/settings.json"));
+        assert_eq!(p.sync_config(), Path::new("/tmp/x/sync.json"));
         assert_eq!(p.backups_dir(), Path::new("/tmp/x/backups"));
         assert_eq!(p.backup("a.cnbak"), Path::new("/tmp/x/backups/a.cnbak"));
         let hash = "ab".repeat(32);

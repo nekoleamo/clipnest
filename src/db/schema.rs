@@ -12,12 +12,12 @@ use rusqlite::Connection;
 use super::Result;
 
 /// 当前 schema 版本，等于 `MIGRATIONS` 的长度。
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// 按序号排列的迁移脚本：第 `n` 个把库从 `n-1` 推到 `n`。
 ///
 /// 已发布的脚本不可修改（用户库里已经跑过），只能追加新脚本。
-const MIGRATIONS: &[&str] = &[V1];
+const MIGRATIONS: &[&str] = &[V1, V2];
 
 const V1: &str = r#"
 CREATE TABLE IF NOT EXISTS groups (
@@ -74,6 +74,15 @@ END;
 CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
+);
+"#;
+
+/// v2：删除留下墓碑，供 P4 同步把「删除」传播到其它设备。
+const V2: &str = r#"
+CREATE TABLE IF NOT EXISTS tombstones (
+  content_hash  TEXT PRIMARY KEY,
+  deleted_at    TEXT NOT NULL,
+  device_id     TEXT
 );
 "#;
 

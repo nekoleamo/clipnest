@@ -150,8 +150,28 @@ pub fn get(conn: &Connection, id: i64) -> Result<Option<Item>> {
 }
 
 /// 删一条（图片文件等资源由调用方清理）。
+///
+/// 同时留一条墓碑：P4 同步靠它把「删除」传播到别的设备（`items` 行没了，
+/// 光看表看不出删过什么）。
 pub fn delete(conn: &Connection, id: i64) -> Result<bool> {
-    Ok(conn.execute("DELETE FROM items WHERE id = ?1", [id])? > 0)
+    let tx = conn.unchecked_transaction()?;
+    let hash: Option<String> = tx
+        .query_row("SELECT content_hash FROM items WHERE id = ?1", [id], |r| {
+            r.get(0)
+        })
+        .optional()?;
+    let Some(hash) = hash else {
+        tx.commit()?;
+        return Ok(false);
+    };
+    tx.execute("DELETE FROM items WHERE id = ?1", [id])?;
+    tx.execute(
+        "INSERT INTO tombstones(content_hash, deleted_at, device_id) VALUES (?1, ?2, NULL)
+           ON CONFLICT(content_hash) DO UPDATE SET deleted_at = excluded.deleted_at",
+        params![hash, now()],
+    )?;
+    tx.commit()?;
+    Ok(true)
 }
 
 /// 总条数。
