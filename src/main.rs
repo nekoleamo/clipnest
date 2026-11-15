@@ -20,6 +20,8 @@ fn main() -> impl std::process::Termination {
             #[cfg(any(target_os = "linux", target_os = "windows"))]
             app_id: "com.example.clipnest".to_owned(),
             size: (420, 320),
+            // macOS 后端独有字段：Windows/Linux 的 AppOptions 没有它们（nsh 0.5.1）
+            #[cfg(target_os = "macos")]
             keep_alive_on_close: true,
             #[cfg(target_os = "macos")]
             activation_policy: platform::ActivationPolicy::Accessory,

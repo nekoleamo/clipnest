@@ -28,3 +28,6 @@ objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSPasteboard", "NSApplication", "NSWindow", "NSWorkspace", "NSRunningApplication"] }
 objc2-foundation = { version = "0.3", default-features = false }
 core-graphics = "0.25"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+nsh-platform-windows = { version = "0.5.1", default-features = false }

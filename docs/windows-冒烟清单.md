@@ -3,7 +3,25 @@
 > 目的：只用最少的事确认「nsh 的 Windows 后端能不能撑起 clipnest」，避免 P4 同步投入建立在错误假设上（路线图 R1）。
 > 结论分三档：**通过**（继续做 P5）、**部分通过**（记录缺口，能绕就绕）、**不成立**（换壳或放弃双端）。
 >
-> 前置：在 Windows 机器上跑本清单，一次约 15 分钟。macOS 上无法交叉编译（无 rustup target、无 MSVC），所有结论只能来自真机。
+> 前置：**编译和打包可以在 macOS 上完成**（2026-11-15 实测，见下），只有运行验证需要 Windows 真机。
+>
+> ## 交叉编译已打通（2026-11-15 实测）
+>
+> 环境：rustup（brew rust 已卸载）+ `rustup target add x86_64-pc-windows-msvc` + `cargo install cargo-xwin`。
+>
+> | 步骤 | 结果 |
+> | --- | --- |
+> | `cargo xwin check --target x86_64-pc-windows-msvc` | ✅ 通过（全仓，含 nsh-platform-windows、clipboard-rs、rusqlite bundled） |
+> | `cargo xwin build --release --target x86_64-pc-windows-msvc` | ✅ 1m48s，产物 `target/x86_64-pc-windows-msvc/release/nsh-app-clipnest.exe` 43 MB，PE32+ GUI x86-64 |
+> | `nsh package --target windows` | ✅ 2m5s，产出 `.nsh/out/clipnest.zip`（20 MB）与 `.nsh/out/clipnest/`（exe + `nsh/app.json`） |
+> | `clipnest.iss`（Inno Setup 脚本） | ⚠️ 已生成但未打安装包 —— 需要 Windows 侧 `winget install JRSoftware.InnoSetup` |
+>
+> 导入表实测（`llvm-objdump -p`）：`d2d1.dll`、`dwrite.dll`、`d3d11.dll`、`dxgi.dll`、`dcomp.dll`、`dwmapi.dll`、`comctl32.dll`、`bcrypt.dll`、`api-ms-win-crt-*`
+> → 证实 nsh 的 Windows 后端确实是 Win32 + Direct2D 路线，且 UCRT 走系统自带（Win10+ 无需装 VC 运行库）。
+>
+> **所以冒烟的最短路径**：在 Mac 上 `nsh package --target windows`，把 `.nsh/out/clipnest.zip` 拷到 Windows 解压双击，**不需要在 Windows 上装 Rust/nsh/VS**。
+>
+> 交叉编译**无法**验证的（必须真机）：窗口是否抢焦、Popup 层级、`RegisterHotKey` 是否触发、剪贴板事件、`SendInput` 粘贴、托盘图标、多显示器定位。
 
 ## 0. 必须先补的代码（当前只有 macOS 分支）
 
@@ -23,14 +41,24 @@
 
 ## 1. 打包与启动
 
-```powershell
-cd <仓库>
-$env:PATH = "C:\path\to\cargo\bin;$env:PATH"
+**已在 macOS 上完成**，只需把产物拷过去：
+
+```bash
+# macOS 侧
 nsh package --target windows
-# 产物：.nsh\out\clipnest.exe（或同名目录，按 nsh-cli 的输出）
+# → .nsh/out/clipnest.zip（20 MB）
 ```
 
+```powershell
+# Windows 侧：解压后双击 clipnest.exe
+Expand-Archive clipnest.zip -DestinationPath clipnest
+.\clipnest\clipnest.exe
+```
+
+（若要在 Windows 上自行构建：`winget install Rustlang.Rustup` + `irm https://nsh.dev/install.ps1 | iex` + VS Build Tools 的 VCTools 工作负载。）
+
 **判定**：能出可执行文件、双击不闪退。
+**已知**：`AppOptions` 在 Windows 后端缺 `keep_alive_on_close` / `activation_policy` / `background` 三个字段（macOS 独有），关窗即退与「菜单栏常驻」形态在 Windows 上需要另外确认。
 **失败信号**：链接错误缺 `windows-sys` / `nsh-platform-windows` 拉不下来 / 启动即退出（看事件查看器或控制台重定向）。
 
 ## 2. 窗口：Popup 能不能开、是不是不抢焦点
