@@ -141,6 +141,105 @@ pub fn paste(row: &Row) -> bool {
     }
 }
 
+/// 复制到剪贴板但不粘贴（留在面板里，方便接着选别的）。
+pub fn copy(row: &Row) -> bool {
+    let Some(db) = store::db() else {
+        return false;
+    };
+    let Ok(conn) = db.lock() else {
+        return false;
+    };
+    let item = match db::items::get(&conn, row.id) {
+        Ok(Some(item)) => item,
+        _ => return false,
+    };
+    match crate::clipboard::write_back(&item) {
+        Ok(cc) => {
+            if let Err(e) = db::items::touch(&conn, item.id) {
+                logs::line(format!("TOUCH ERROR id={} {e}", item.id));
+            }
+            logs::line(format!("COPY id={} cc={cc}", item.id));
+            true
+        }
+        Err(e) => {
+            logs::line(format!("COPY FAILED id={} {e}", item.id));
+            false
+        }
+    }
+}
+
+/// 删一条（图片等资源清理等 P3 的资源管线）。
+pub fn remove(row: &Row) -> bool {
+    let Some(db) = store::db() else {
+        return false;
+    };
+    let Ok(conn) = db.lock() else {
+        return false;
+    };
+    match db::items::delete(&conn, row.id) {
+        Ok(true) => {
+            logs::line(format!("DELETE id={}", row.id));
+            true
+        }
+        Ok(false) => {
+            logs::line(format!("DELETE gone id={}", row.id));
+            false
+        }
+        Err(e) => {
+            logs::line(format!("DELETE ERROR id={} {e}", row.id));
+            false
+        }
+    }
+}
+
+/// 置顶 / 收藏切换。契约 6：这类改动不刷新 `updated_at`。
+pub fn toggle_flag(row: &Row, pin: bool) -> Option<bool> {
+    let db = store::db()?;
+    let conn = db.lock().ok()?;
+    let item = db::items::get(&conn, row.id).ok()??;
+    let next = if pin { !item.pinned } else { !item.favorite };
+    let patch = if pin {
+        db::items::MetaPatch {
+            pinned: Some(next),
+            ..Default::default()
+        }
+    } else {
+        db::items::MetaPatch {
+            favorite: Some(next),
+            ..Default::default()
+        }
+    };
+    match db::items::update_meta(&conn, item.id, &patch) {
+        Ok(()) => {
+            logs::line(format!(
+                "{} id={} -> {next}",
+                if pin { "PIN" } else { "FAV" },
+                item.id
+            ));
+            Some(next)
+        }
+        Err(e) => {
+            logs::line(format!("META ERROR id={} {e}", item.id));
+            None
+        }
+    }
+}
+
+/// 取当前选中的行。
+fn selected(rows: &Signal<Vec<Row>>, sel: &Signal<usize>) -> Option<Row> {
+    rows.with(|r| r.get(sel.get()).cloned())
+}
+
+/// 重新查一遍列表（动作后调用），并把选中位置夹回范围内。
+fn refresh(rows: &Signal<Vec<Row>>, sel: &Signal<usize>, q: &Signal<String>) {
+    let query = q.get();
+    rows.set(rows_for(&query));
+    let n = rows.with(Vec::len);
+    if sel.get() >= n {
+        sel.set(n.saturating_sub(1));
+    }
+}
+
 /// 面板组件（放在 Popup 窗口的 content 里）。
 #[component]
 pub fn Panel() -> impl IntoElement {
@@ -223,6 +322,56 @@ pub fn Panel() -> impl IntoElement {
             logs::line("ESC dismiss".to_owned());
             crate::dismiss();
         });
+
+        // ⌘1-9：直接粘贴第 N 条（不用先移动选中）
+        for i in 1..=9u8 {
+            let rows_n = rows.clone();
+            on_key_with(&format!("mod+{i}"), arrows, move |_| {
+                let target = rows_n.with(|r| r.get(i as usize - 1).cloned());
+                if let Some(row) = target {
+                    paste(&row);
+                }
+            });
+        }
+
+        // ⌘D 删除
+        let (rows_d, sel_d, q_d) = (rows.clone(), sel.clone(), q.clone());
+        on_key_with("mod+d", arrows, move |_| {
+            if let Some(row) = selected(&rows_d, &sel_d)
+                && remove(&row)
+            {
+                refresh(&rows_d, &sel_d, &q_d);
+            }
+        });
+
+        // ⌘P 置顶（会改变排序，必须重查）
+        let (rows_p, sel_p, q_p) = (rows.clone(), sel.clone(), q.clone());
+        on_key_with("mod+p", arrows, move |_| {
+            if let Some(row) = selected(&rows_p, &sel_p)
+                && toggle_flag(&row, true).is_some()
+            {
+                refresh(&rows_p, &sel_p, &q_p);
+            }
+        });
+
+        // ⌘S 收藏（不改 updated_at，不改变排序，但行上要出现 ★）
+        let (rows_f, sel_f, q_f) = (rows.clone(), sel.clone(), q.clone());
+        on_key_with("mod+s", arrows, move |_| {
+            if let Some(row) = selected(&rows_f, &sel_f)
+                && toggle_flag(&row, false).is_some()
+            {
+                refresh(&rows_f, &sel_f, &q_f);
+            }
+        });
+
+        // ⌘Y 复制到剪贴板（yank；不粘贴、不收起面板）。
+        // 不用 ⌘⇧C：实测 shift 组合到不了 keymap（osascript 与 CGEvent 都试过）。
+        let (rows_c, sel_c) = (rows.clone(), sel.clone());
+        on_key_with("mod+y", arrows, move |_| {
+            if let Some(row) = selected(&rows_c, &sel_c) {
+                copy(&row);
+            }
+        });
         let rows_up = rows_key.clone();
         let sel_up = sel_key.clone();
         let list_up = list_keys.clone();
@@ -283,31 +432,37 @@ pub fn Panel() -> impl IntoElement {
                 .element_ref(&list)
                 .flex_1()
                 .child(
-                    // dynamic：rows 一变就重建列表。用静态 children 的话列表停在首帧，
-                    // 搜索/新增都不会反映（底部那行是响应式的，所以会骗人）。
-                    dynamic(move || {
-                        let items = rows_view.get();
-                        view()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .children(
-                                items
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(i, row)| row_view(row, i, sel_view.clone())),
-                            )
-                            .child(empty_hint(rows_view.clone()))
-                    }),
+                    // 用 `each` 而不是静态 children：静态列表停在首帧（不刷新）；
+                    // `dynamic` 会整块重建，删一条就让搜索框失焦、面板被 blur 关掉。
+                    // `each` 带 key，只增删变化的那一行。
+                    view()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(each(
+                            rows_view.clone(),
+                            |row: &Row| row.id,
+                            move |row, index| {
+                                let r = row.get();
+                                let i = index.get();
+                                row_view(&r, i, sel_view.clone())
+                            },
+                        ))
+                        .child(empty_hint(rows_view.clone())),
                 ),
         )
         .child(
             text(move || {
                 let n = rows.with(Vec::len);
                 if n == 0 {
-                    "↑↓ 选择 · ⏎ 粘贴".to_owned()
+                    "↑↓ 选择 · ⏎ 粘贴 · ⌘1-9 直贴 · ⌘D 删除 · ⌘P 置顶 · ⌘S 收藏 · ⌘Y 复制"
+                        .to_owned()
                 } else {
-                    format!("{}/{} · ↑↓ 选择 · ⏎ 粘贴", sel.get().min(n - 1) + 1, n)
+                    format!(
+                        "{}/{} · ↑↓ 选择 · ⏎ 粘贴 · ⌘1-9 直贴 · ⌘D 删除 · ⌘P 置顶 · ⌘S 收藏 · ⌘Y 复制",
+                        sel.get().min(n - 1) + 1,
+                        n
+                    )
                 }
             })
             .text_size(px(10.0))
@@ -316,7 +471,7 @@ pub fn Panel() -> impl IntoElement {
 }
 
 /// 一行：标签 + 摘要 + 时间，选中态高亮。
-fn row_view(row: &Row, index: usize, sel: Signal<usize>) -> impl IntoElement {
+fn row_view(row: &Row, index: usize, sel: Signal<usize>) -> View {
     let id = row.id;
     let tag = row.tag.clone();
     let summary = row.summary.clone();
@@ -340,6 +495,15 @@ fn row_view(row: &Row, index: usize, sel: Signal<usize>) -> impl IntoElement {
             }
         })
         .on_press(move |_: &()| sel_press.set(index))
+        .child(
+            text(if index < 9 {
+                format!("⌘{}", index + 1)
+            } else {
+                String::new()
+            })
+            .text_size(px(9.0))
+            .text_color(move || theme().muted_foreground),
+        )
         .child(
             text(format!("{tag}"))
                 .text_size(px(10.0))

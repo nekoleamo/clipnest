@@ -15,8 +15,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use nsh_base::theme;
-use nsh_core::desktop::{WindowAttributes, WindowKind};
+use nsh_core::desktop::{WindowAttributes, WindowFrame, WindowKind};
 use nsh_core::element::desktop::{WindowRef, current_window, register_global_shortcut, window};
 use nsh_core::prelude::*;
 
@@ -166,15 +165,30 @@ pub fn App() -> impl IntoElement {
     });
 
     // nsh 的 run_app 总会开一个主窗口；clipnest 是常驻应用，主窗口不该露出来。
+    //
+    // 不能 hide()：主窗口一隐藏，应用就不算 active，面板永远成不了 key window
+    // （实测 `key=None active=false`，键盘全被前台应用吃掉）。改成挪到屏幕外。
     effect(move || {
         if std::env::var("SPIKE_NO_HIDE").is_ok() {
             return;
         }
         let main = current_window();
         set_timeout(Duration::from_millis(60), move || {
-            main.hide();
+            // 先去掉边框与标题栏：带标题栏的窗口被系统强制留 40pt 在屏幕内。
+            let mut attrs = WindowAttributes::for_kind(WindowKind::Normal);
+            attrs.frame = Some(nsh_core::desktop::WindowFrameStyle::None);
+            attrs.transparent = Some(true);
+            attrs.title_bar = Some(Default::default());
+            // 屏幕上还留着 40pt（系统不让窗口完全移出）：让它别挡鼠标。
+            attrs.pointer_events = Some(nsh_core::desktop::WindowPointerEvents::None);
+            main.set(attrs);
+            main.set_bounds(WindowFrame {
+                x: Some(px(-4000.0)),
+                y: Some(px(-4000.0)),
+                ..Default::default()
+            });
             logs::line(format!(
-                "MAIN window hidden id={} main={}",
+                "MAIN window parked off-screen id={} main={}",
                 main.id(),
                 main.is_main()
             ));
@@ -195,7 +209,7 @@ pub fn App() -> impl IntoElement {
 
     view()
         .flex_1()
-        .bg(move || theme().background)
+        .bg(move || transparent_black())
         .child(
         window()
             .id("panel")
@@ -207,6 +221,9 @@ pub fn App() -> impl IntoElement {
                 // 键盘全被前台应用吃掉（实测 key=None active=false）。
                 // 粘贴时用 clipboard::return_to_previous_app() 切回去。
                 attrs.activate = Some(std::env::var("SPIKE_NO_ACTIVATE").is_err());
+                // 失焦自动收起有个副作用：重渲染导致 field editor 重挂时也会
+                // 收到 blur，面板会自己关掉（实测删条目后必现）。改成只认 Esc。
+                attrs.close_on_blur = Some(std::env::var("SPIKE_CLOSE_ON_BLUR").is_ok());
                 attrs
             })
             .open(open)

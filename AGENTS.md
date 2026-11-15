@@ -50,7 +50,11 @@ nsh test
 18. **`Signal` 要放 `static`，不要放 `thread_local`**：`set_timeout`、托盘菜单的回调可能不在主线程，thread_local 里读到的是 `None`（设置窗因此打不开）。`Signal` 是 `Copy + Send + Sync`；`WindowRef`/`ElementRef` 才留在 thread_local。
 19. 托盘图标 16 pt 纯图标既难确认也点不准：给 `Tray::title()` 配一个字符（如 `❐`），`System Events` 就能按名字点到。SVG 图标走模板渲染，笔画只用 `black`。
 20. 受控 `input`（`.value(信号)`）在 `on_change` 里必须同步更新那个信号，否则输入被回滚。
-21. 面板激活自己会抢走前台：粘贴流程 = 写回 → `dismiss()`（隐藏 + `NSRunningApplication::activate` 原应用）→ 120 ms → ⌘V；原应用 pid 在打开前用 `NSWorkspace.frontmostApplication()` 记。
+21. **主窗口不能 `hide()`**：一隐藏应用就不算 active，面板永远成不了 key window（`key=None active=false`，键盘全丢）。做法：去掉标题栏 + `transparent` + `set_bounds` 挪到屏幕外（系统最多只让到 `x=-380`，剩 40pt）+ `pointer_events: None` + 根视图背景透明。
+22. **`⌘⇧X` 这类 shift 组合到不了 keymap**（`mod+shift+c` 实测不触发，osascript 与 CGEvent 都不行）；单修饰组合（`⌘P`/`⌘S`/`⌘D`/`⌘Y`）正常。
+23. **`close_on_blur` 会和重渲染打架**：列表变化 → field editor 重挂 → 收到 blur → 面板自己关掉。设 `close_on_blur = Some(false)`，收起只认 Esc（或粘贴后 `dismiss()`）。
+24. 响应式列表用 `each(rows, |r| r.id, …)`：静态 `children` 不刷新，`dynamic` 整块重建会把搜索框焦点搞丢。行渲染函数返回具体 `View`（`impl IntoElement` 会带出 `&Row` 生命周期，E0515）。
+25. 面板激活自己会抢走前台：粘贴流程 = 写回 → `dismiss()`（隐藏 + `NSRunningApplication::activate` 原应用）→ 120 ms → ⌘V；原应用 pid 在打开前用 `NSWorkspace.frontmostApplication()` 记。
 
 ## 代码检索
 

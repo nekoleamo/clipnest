@@ -42,6 +42,28 @@ if what.hasPrefix("type:") {
     exit(0)
 }
 
+// ⌘+字符 / ⌘⇧+字符：三次测试动作键位用。
+if what.hasPrefix("mod:") || what.hasPrefix("modshift:") {
+    let shift = what.hasPrefix("modshift:")
+    let text = String(what.dropFirst(shift ? 9 : 4))
+    guard let ch = text.first, let code = keycode(for: ch) else {
+        print("unknown key \(text)")
+        exit(1)
+    }
+    let src = CGEventSource(stateID: .combinedSessionState)!
+    var flags: CGEventFlags = [.maskCommand]
+    if shift { flags.insert(.maskShift) }
+    let down = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: true)!
+    let up = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: false)!
+    down.flags = flags
+    up.flags = flags
+    down.post(tap: .cghidEventTap)
+    usleep(40_000)
+    up.post(tap: .cghidEventTap)
+    print("posted \(what)")
+    exit(0)
+}
+
 let (code, flags): (CGKeyCode, CGEventFlags) = {
     switch what {
     case "combo": return (9, [.maskCommand, .maskShift])
