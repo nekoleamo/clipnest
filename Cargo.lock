@@ -2012,6 +2012,7 @@ dependencies = [
  "nsh-core",
  "nsh-platform-macos",
  "nsh-platform-windows",
+ "nsh-updater",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",

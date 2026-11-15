@@ -14,3 +14,9 @@
 
 # codegraph 索引（本机生成）
 .codegraph/
+
+# 发布签名密钥（私钥绝不入库）
+.keys/
+
+# 发布产物
+/dist/

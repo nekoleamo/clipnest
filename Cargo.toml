@@ -23,6 +23,7 @@ argon2 = "0.6.0"
 getrandom = "0.4.3"
 image = { version = "0.25.10", default-features = false, features = ["bmp", "png", "tiff"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "rustls", "http2"] }
+nsh-updater = "0.5.1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 nsh-platform-macos = { version = "0.5.1", default-features = false }

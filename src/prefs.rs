@@ -180,6 +180,24 @@ pub fn Prefs() -> impl IntoElement {
         );
 
     let sens_count = crate::sensitive::list(&crate::settings()).len();
+    // 检查更新 / 安装（自更新：应用自己下载的文件不带 Gatekeeper 标记）
+    let upd_note = signal(crate::update::status());
+    effect(move || {
+        set_interval(Duration::from_millis(500), move || {
+            let text = crate::update::status();
+            if text != upd_note.get() {
+                upd_note.set(text);
+            }
+        });
+    });
+    let upd_status = upd_note;
+    let check_btn = button("检查更新").on_press(move |_: &()| {
+        crate::update::check_async();
+    });
+    let install_btn = button("安装更新").on_press(|_: &()| {
+        crate::update::install_async();
+    });
+
     let dir = crate::paths().root().display().to_string();
 
     view()
@@ -239,6 +257,17 @@ pub fn Prefs() -> impl IntoElement {
                         .text_color(move || theme().foreground),
                 )
                 .child(hint("Esc 收起；↑↓ 选择；⏎ 粘贴")),
+        )
+        .child(
+            row()
+                .child(label("更新"))
+                .child(check_btn)
+                .child(install_btn)
+                .child(
+                    text(move || upd_status.get())
+                        .text_size(px(10.0))
+                        .text_color(move || theme().muted_foreground),
+                ),
         )
         .child(sync_section())
         .child(

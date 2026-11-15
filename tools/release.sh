@@ -27,16 +27,33 @@ cargo xwin clippy --target x86_64-pc-windows-msvc --all-targets --quiet -- -D wa
 
 echo "== 打包 macOS"
 nsh package --target macos
-# ditto 保留符号链接与扩展属性；zip 里的 .app 才能直接跑
+# nsh 会顺手产出更新用的 archive：clipnest-<ver>-macos-aarch64.tar.gz
+MAC_ARCHIVE=".nsh/out/clipnest-${VERSION}-macos-$(uname -m | sed 's/x86_64/x86_64/;s/arm64/aarch64/').tar.gz"
+cp "$MAC_ARCHIVE" "${OUT}/"
+# 给普通用户下载的 zip（ditto 保留符号链接与扩展属性）
 rm -f "${OUT}/clipnest-${VERSION}-macos.zip"
 ditto -c -k --sequesterRsrc --keepParent .nsh/out/clipnest.app "${OUT}/clipnest-${VERSION}-macos.zip"
 
 echo "== 打包 Windows"
 nsh package --target windows
-cp .nsh/out/clipnest.zip "${OUT}/clipnest-${VERSION}-windows.zip"
+# 同一份文件两个用途（用户下载 + 自更新），统一用 nsh 的命名，只上传一次
+cp .nsh/out/clipnest-${VERSION}-windows-x86_64.zip "${OUT}/"
+
+echo "== 生成并签名更新清单（latest.json）"
+if [ ! -f .keys/clipnest-release.secret ]; then
+  echo "缺少签名私钥 .keys/clipnest-release.secret" >&2
+  echo "首次做发布密钥： nsh keygen .keys/clipnest-release  然后把 .pub 填进 nsh.json 的 updater.publicKey" >&2
+  exit 1
+fi
+nsh update-manifest \
+  "${OUT}/clipnest-${VERSION}-macos-aarch64.tar.gz" \
+  "${OUT}/clipnest-${VERSION}-windows-x86_64.zip" \
+  --key .keys/clipnest-release.secret \
+  --out "${OUT}" \
+  --base-url "https://github.com/${OWNER}/${REPO}/releases/download/v${VERSION}/"
 
 echo "== 校验和"
-(cd "$OUT" && shasum -a 256 "clipnest-${VERSION}-macos.zip" "clipnest-${VERSION}-windows.zip" > SHA256SUMS)
+(cd "$OUT" && shasum -a 256 *.zip *.tar.gz latest.json > SHA256SUMS)
 cat "$OUT/SHA256SUMS"
 
 echo "== 生成 cask 片段"
@@ -51,8 +68,12 @@ cat <<EOF
 
 == 下一步（手动，需要仓库已建好）
 1. 上传到 GitHub Releases：
-   gh release create "v${VERSION}" "${OUT}/clipnest-${VERSION}-macos.zip" "${OUT}/clipnest-${VERSION}-windows.zip" \\
-      --title "clipnest ${VERSION}" --notes-file "docs/发布说明-${VERSION}.md"
+   gh release create "v${VERSION}" \\
+     "${OUT}/clipnest-${VERSION}-macos.zip" \\
+     "${OUT}/clipnest-${VERSION}-macos-aarch64.tar.gz" \\
+     "${OUT}/clipnest-${VERSION}-windows-x86_64.zip" \\
+     "${OUT}/latest.json" "${OUT}/latest.json.sig" \\
+     --title "clipnest ${VERSION}" --notes-file "docs/发布说明-${VERSION}.md"
 2. 把 ${OUT}/clipnest.cask.rb 放到 tap 仓库（<owner>/homebrew-<repo>）的 Casks/clipnest.rb
 3. Windows 用户装完后会被 SmartScreen 拦一次：更多信息 → 仍要运行（未签名 exe 的正常提示）
 

@@ -17,5 +17,9 @@
   "macos": {
     "activationPolicy": "accessory"
   },
-  "singleInstance": true
+  "singleInstance": true,
+  "updater": {
+    "github": "nekoleamo/clipnest",
+    "publicKey": "BBuxSwh20y42uC4dW5W261KFuJHLE+N9PaqJlBbThLA="
+  }
 }

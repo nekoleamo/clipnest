@@ -35,6 +35,7 @@ pub mod sensitive;
 pub mod settings;
 pub mod store;
 pub mod sync;
+pub mod update;
 pub mod tray;
 
 /// 供打包器/TSX 侧引用的模块注册（`nsh.json` 的 `"rust"`）。
