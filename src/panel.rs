@@ -116,6 +116,12 @@ fn origin_of(item: &Item) -> Option<String> {
     path.exists().then(|| path.display().to_string())
 }
 
+/// 当前外观下的前景色（`placeholder_color`/`caret_color` 只收 `Hsla`）。
+pub fn pick_foreground() -> nsh_core::Hsla {
+    let fg = theme().foreground;
+    if dark() { fg.dark } else { fg.light }
+}
+
 /// 查一次库，返回渲染用的行。
 pub fn rows_for(q: &str) -> Vec<Row> {
     let Some(db) = store::db() else {
@@ -531,6 +537,10 @@ pub fn Panel() -> impl IntoElement {
         .auto_focus(true)
         .value(move || q.get())
         .placeholder("搜索剪贴板历史…")
+        .text_color(pick_foreground)
+        // 默认 placeholder 颜色在深色背景上几乎看不清，直接用前景色（白/黑按系统外观）
+        .placeholder_color(pick_foreground)
+        .caret_color(pick_foreground)
         .text_size(px(13.0))
         .px_3()
         .py_2()

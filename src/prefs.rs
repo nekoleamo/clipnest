@@ -25,10 +25,22 @@ pub fn Prefs() -> impl IntoElement {
     let max_field = input()
         .value(move || max_now.with(|s| s.max_items.to_string()))
         .text_size(px(12.0))
+        .text_color(|| {
+            let fg = theme().foreground;
+            if dark() { fg.dark } else { fg.light }
+        })
         .px_2()
         .py_1()
         .rounded_md()
         .w(px(80.0))
+        .placeholder_color(|| {
+            let fg = theme().foreground;
+            if dark() { fg.dark } else { fg.light }
+        })
+        .caret_color(|| {
+            let fg = theme().foreground;
+            if dark() { fg.dark } else { fg.light }
+        })
         .bg(move || theme().muted)
         .on_change(move |text: &str| {
             let Ok(n) = text.trim().parse::<i64>() else {
@@ -51,10 +63,22 @@ pub fn Prefs() -> impl IntoElement {
     let height_field = input()
         .value(move || height_now.with(|s| s.panel_height.to_string()))
         .text_size(px(12.0))
+        .text_color(|| {
+            let fg = theme().foreground;
+            if dark() { fg.dark } else { fg.light }
+        })
         .px_2()
         .py_1()
         .rounded_md()
         .w(px(80.0))
+        .placeholder_color(|| {
+            let fg = theme().foreground;
+            if dark() { fg.dark } else { fg.light }
+        })
+        .caret_color(|| {
+            let fg = theme().foreground;
+            if dark() { fg.dark } else { fg.light }
+        })
         .bg(move || theme().muted)
         .on_change(move |text: &str| {
             let Ok(n) = text.trim().parse::<i32>() else {
@@ -506,6 +530,7 @@ fn sync_section() -> View {
         input()
             .value(value)
             .text_size(px(11.0))
+            .text_color(crate::panel::pick_foreground)
             .px_2()
             .py_1()
             .rounded_md()
