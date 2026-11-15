@@ -30,6 +30,14 @@ nsh test
 9. **`lib.rs` 必须有 `#[native_module("<app>/native")]`**，否则打包时 describe bin 编译失败。
 10. **产物体积固定约 50 MB**：`nsh-cli` 生成的 runner 硬编码 8 个 features，`default-features = false` 无效。
 
+## 数据层已确认的坑（P1 实测）
+
+1. **FTS5 `trigram` 查询词必须 ≥3 个字符**：2 个汉字（「银河」）命中不了，必须降级 `LIKE`（`db::search::FTS_MIN_CHARS`）。
+2. `cargo add chacha20poly1305 argon2` 现在拉到 **0.11 / 0.6**：`Key::from([u8;32])`、`Nonce::from([u8;12])`，`from_slice` 已废弃（编译警告）。
+3. 私有模块里的 `pub` 项会触发 `dead_code` 警告 → 模块本身也要 `pub mod`。
+4. **不要用 `nsh_core::data_dir()` 当数据根**：它返回 `<数据目录>/<app id>`（`com.example.clipnest`）且依赖 nsh 运行时，`cargo test` 里拿不到；根目录统一走 `src/paths.rs`。
+5. 编辑库里加列/加表只能追加迁移脚本（`src/db/schema.rs` 的 `MIGRATIONS`），已发布的脚本不可改。
+
 ## 代码检索
 
 本仓库已有 `.codegraph/` 索引（codegraph 1.6.2）。改代码前优先走 codegraph MCP（`codegraph_explore`，传 `projectPath=/Users/nekoleamo/Documents/Working/clipnest`），不要逐个 grep/read。改动较大后重建：`codegraph init`（增量）或 `codegraph status` 查是否过期。
