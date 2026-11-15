@@ -55,6 +55,10 @@ docs/            路线图、执行计划、验证记录
 4. `Panel: true` 的窗口在 macOS 是 `NSPanel` 非激活样式：抢键盘但不激活 app；`OnClose` 里必须 `PreventDefault` + `Hide`，否则窗口被销毁、下次唤醒要重建
 5. `Clipboard.OnChanged` 在 macOS 是 250ms `changeCount` 轮询（不在复制瞬间触发），采集逻辑要容忍这个延迟
 66. 应用是 accessory（无 Dock 图标）时要同时 `OnWindowAllClosed(func(){})`，否则关掉最后一个窗口就退出
+7. **纯 Go 程序里 `objc_getClass("NSWorkspace")` 返回 0**：必须先 `purego.Dlopen(".../AppKit.framework/AppKit", RTLD_NOW|RTLD_GLOBAL)` 把框架真的载进进程（Foundation 同理），并把句柄保活；否则只能退到 `lsappinfo`
+8. `purego.RegisterLibFunc` **不返回 error**，失败是 panic：包一层 `recover` 转 error，否则初始化阶段直接崩
+9. 读 `NSString` 不要解引用 `UTF8String` 指针（uintptr→unsafe.Pointer 会被 go vet 判 unsafeptr）：用 `getCString:maxLength:encoding:` 让系统写进 Go 的缓冲区
+10. `lsappinfo info -only bundleid` 的输出是 `CFBundleIdentifier"="com.x.y`，取 `=` 之后并去引号，别取首尾引号之间
 
 ## 每轮收尾
 
