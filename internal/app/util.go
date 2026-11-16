@@ -73,6 +73,10 @@ func openAccessibilitySettings() {
 		logf("AXP open settings failed: %v", err)
 		return
 	}
+	// 再激活一次：面板是 floating window，不把设置窗口提到最前就会被盖住
+	if err := exec.Command("open", "-b", "com.apple.systempreferences").Run(); err != nil {
+		logf("AXP activate settings failed: %v", err)
+	}
 	logf("AXP opened settings")
 }
 
