@@ -58,3 +58,31 @@ func TestMouseClickSelectsRow(t *testing.T) {
 		}
 	}
 }
+
+// TestArrowKeysAfterClickingPreview 点过右栏之后，方向键仍然选列表（焦点要还给搜索框）。
+func TestArrowKeysAfterClickingPreview(t *testing.T) {
+	a := newTestApp(t)
+	for i := 0; i < 6; i++ {
+		record(t, a, "条目 "+string(rune('A'+i)))
+	}
+	tester := ui.NewTester(a.PanelView, 720, 560)
+	tester.Frame()
+
+	// 先渲染两帧，让 card 的 bounds 有值
+	tester.Frame()
+	// 点右栏卡片的空白处（不是输入框）
+	card := a.previewCardRect()
+	if card.W <= 0 {
+		t.Fatal("没量到右栏卡片")
+	}
+	tester.ClickAt(card.X+card.W-6, card.Y+6)
+	tester.Frame()
+
+	before, _ := a.Selection()
+	tester.KeyDown(ui.KeyDown)
+	tester.Frame()
+	after, _ := a.Selection()
+	if after != before+1 {
+		t.Fatalf("点过右栏后方向键失效：%d → %d", before, after)
+	}
+}

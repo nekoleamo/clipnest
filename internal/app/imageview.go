@@ -26,6 +26,14 @@ func (a *App) ShowImage(row Row) {
 	win := a.imageWin
 	a.imageRow = row
 	a.mu.Unlock()
+	if a.zoomProbe != nil {
+		a.zoomProbe(row)
+	}
+	if win == nil {
+		// 没有窗口（测试环境或还没建好）：到此为止，别去碰 Screen（会等主线程）
+		return
+	}
+	logf("ZOOM show id=%d size=%dx%d", row.ID, row.Width, row.Height)
 
 	d := mygo.Screen.DisplayNearestPoint(mygo.Screen.CursorScreenPoint())
 	maxW := float32(d.WorkArea.Width) * 0.85
@@ -103,7 +111,8 @@ func (a *App) ImageView(c *ui.Context) {
 			if b := bitmapFor(row.OriginPath); b != nil {
 				boxW := float32(c.Root().Bounds().W) - 20
 				boxH := float32(c.Root().Bounds().H) - 44
-				w, h := fitSize(row.Width, row.Height, boxW, boxH)
+				// 大图窗里也允许放大（小图看着才有意义）
+				w, h := fitSizeUp(row.Width, row.Height, boxW, boxH, 6)
 				ui.Column(c).Fill().Justify(ui.Center).AlignItems(ui.Center).Children(func() {
 					ui.Image(c, b).Size(w, h).Fit(ui.Contain).Radius(6)
 				})

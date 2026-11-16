@@ -80,6 +80,12 @@ type App struct {
 	axPrompted atomic.Bool
 	// dragProbe 只在测试里用：拖拽开始时把载荷交出去断言
 	dragProbe func(transfer.Data)
+	// imageRect 是右栏图片区域的位置（测试与点击放大用）
+	imageRect ui.Rect
+	// previewCard 是右栏卡片的区域
+	previewCard ui.Rect
+	// zoomProbe 只在测试里用：点预览图时把 row 交出去断言
+	zoomProbe func(Row)
 	// imageWin/imageRow 是「点预览图放大看」的独立窗口
 	imageWin *mygo.Window
 	imageRow Row
@@ -426,6 +432,13 @@ func (a *App) runPending() {
 	for _, fn := range fns {
 		fn()
 	}
+}
+
+// previewCardRect 返回右栏卡片上一帧的区域（测试用）。
+func (a *App) previewCardRect() ui.Rect {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.previewCard
 }
 
 // bindSearchInput 记下搜索框句柄与当前渲染上下文。
@@ -851,6 +864,81 @@ func (a *App) dragData(id int64) transfer.Data {
 		}
 		logf("DRAG id=%d text=%d runes file=%s", item.ID, len([]rune(item.Content)), dest)
 		return transfer.New(append(text.Items(), files.Items()...)...)
+	}
+}
+
+// ExportWithDialog 让用户先选位置再导出（右键菜单用）。
+//
+// 文本/图片选「保存到哪个文件」，文件条目选「复制到哪个目录」。
+func (a *App) ExportWithDialog(row Row) error {
+	item, ok, err := db.Get(a.Store.DB, row.ID)
+	if err != nil || !ok {
+		return fmt.Errorf("条目不存在")
+	}
+	dir := a.exportDir()
+
+	switch item.Kind {
+	case model.KindFiles:
+		targets, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+			Title:       "把文件复制到…",
+			DefaultPath: dir,
+			ButtonLabel: "复制到这里",
+			Directory:   true,
+		})
+		if err != nil {
+			return err
+		}
+		if len(targets) == 0 {
+			return nil // 取消
+		}
+		dest := targets[0]
+		n := 0
+		for _, line := range strings.Split(item.Content, "\n") {
+			if line == "" || !fileExists(line) {
+				continue
+			}
+			if err := copyFile(line, filepathJoin(dest, baseName(line))); err != nil {
+				return err
+			}
+			n++
+		}
+		if n == 0 {
+			return fmt.Errorf("文件条目里的路径都不在了")
+		}
+		logf("EXPORT dialog files=%d to=%s", n, dest)
+		return nil
+
+	case model.KindImage:
+		hash := strings.TrimSuffix(item.Content, ".png")
+		origin := a.Paths.ImageOrigin(hash)
+		path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
+			Title:       "导出图片",
+			DefaultPath: filepathJoin(dir, hash+".png"),
+			ButtonLabel: "导出",
+		})
+		if err != nil || path == "" {
+			return err
+		}
+		if err := copyFile(origin, path); err != nil {
+			return err
+		}
+		logf("EXPORT dialog image=%s", path)
+		return nil
+
+	default:
+		path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
+			Title:       "导出文本",
+			DefaultPath: filepathJoin(dir, fmt.Sprintf("clipnest-%d.txt", item.ID)),
+			ButtonLabel: "导出",
+		})
+		if err != nil || path == "" {
+			return err
+		}
+		if err := writeFile(path, []byte(item.Content)); err != nil {
+			return err
+		}
+		logf("EXPORT dialog text=%s", path)
+		return nil
 	}
 }
 

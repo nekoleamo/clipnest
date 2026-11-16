@@ -422,9 +422,12 @@ func (a *App) previewView(c *ui.Context, l panelLayout) {
 	row, ok := a.Selected()
 
 	card := ui.Column(c).Width(l.previewW).FillHeight().Gap(8).
-		Padding(12).Radius(10).Background(th.Surface).Justify(ui.Start)
-	if h := card.Bounds().H; h > 0 {
-		a.previewH = h
+		Padding(12).Radius(10).Background(th.Surface).Justify(ui.Start).
+		// 点右栏空白/图片/卡片背景后把焦点还给搜索框，方向键继续选列表
+		OnClick(func() { a.later(a.refocusSearch) })
+	if b := card.Bounds(); b.H > 0 {
+		a.previewH = b.H
+		a.previewCard = b
 	}
 	card.Children(func() {
 		if !ok {
@@ -566,14 +569,25 @@ func (a *App) previewImage(c *ui.Context, row Row, l panelLayout, th *ui.Theme) 
 	maxW := l.previewW - 24
 	// 小图按栏宽放大（最多 2.4 倍），大图等比缩到框内
 	w, h := fitSizeUp(row.Width, row.Height, maxW, box-18, 2.4)
-	ui.Column(c).Height(box).Justify(ui.Center).AlignItems(ui.Center).Gap(6).Children(func() {
+
+	// 容器要有底色才进命中链（裸 Image 摸不到点击）；点它 = 看大图
+	shot := row
+	area := ui.Column(c).Height(box).Background(th.Surface).Radius(8).
+		Justify(ui.Center).AlignItems(ui.Center).Gap(6).Cursor(ui.CursorPointer).
+		OnClick(func() { a.later(func() { a.ShowImage(shot) }) })
+	a.imageRect = area.Bounds()
+	if os.Getenv("CLIPNEST_DEBUG_RECTS") != "" {
+		b := a.imageRect
+		logf("DBG imgrect=(%.0f,%.0f) %.0fx%.0f", b.X, b.Y, b.W, b.H)
+	}
+	area.Children(func() {
 		ui.Image(c, b).Size(w, h).Fit(ui.Contain).Radius(8)
 		if row.Width > 0 && row.Height > 0 {
 			pct := 100
 			if row.Width > 0 {
 				pct = int(100 * w / float32(row.Width))
 			}
-			ui.Text(c, fmt.Sprintf("%d × %d · 显示 %d%%", row.Width, row.Height, pct)).
+			ui.Text(c, fmt.Sprintf("%d × %d · 显示 %d%% · 点击看大图", row.Width, row.Height, pct)).
 				FontSize(10).TextColor(th.TextMuted)
 		}
 	})
@@ -599,6 +613,7 @@ func (a *App) previewGroup(c *ui.Context, row Row, th *ui.Theme) {
 	if choice != current {
 		pick := choice
 		a.later(func() {
+			defer a.refocusSearch()
 			var gid *int64
 			for _, g := range groups {
 				if g.Name == pick {

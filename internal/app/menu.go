@@ -17,11 +17,11 @@ func (a *App) rowMenu(m *ui.Menu, row Row) {
 	if m.Item("复制").Shortcut(ui.Cmd, ui.KeyY).Chosen() {
 		a.Copy(row)
 	}
-	if m.Item("导出为文件").Shortcut(ui.Cmd, ui.KeyO).Chosen() {
-		if file, err := a.Export(row); err != nil {
+	if m.Item("导出为文件…").Shortcut(ui.Cmd, ui.KeyO).Chosen() {
+		if err := a.ExportWithDialog(row); err != nil {
 			a.SetStatus("❌ " + err.Error())
 		} else {
-			a.SetStatus("已导出 " + baseName(file) + "（⌘V 可粘文件）")
+			a.SetStatus("已导出")
 		}
 	}
 
