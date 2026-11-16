@@ -70,6 +70,8 @@ type App struct {
 	// debounce 是实时模式下的采集防抖定时器
 	debounceMu sync.Mutex
 	debounce   *time.Timer
+	// axPrompted 记录辅助功能提示是否已弹过
+	axPrompted atomic.Bool
 	// lastSync/lastSyncVia 是最近一次成功的同步时间与入口
 	lastSync    string
 	lastSyncVia string
@@ -741,6 +743,25 @@ func (a *App) StartAutoSync() {
 // SortRowsStable 让行顺序稳定（调试用）。
 func SortRowsStable(rows []Row) {
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
+}
+
+// RequestAccessibility 处理「去授权」：
+//
+// 第一次弹系统的辅助功能授权提示（它会顺手把 app 加进名单），用户点里面的
+// 「打开系统设置」就行——不再自己另开一个设置窗，免得两个窗口竖在一起。
+// 已经弹过还没授权（用户拒了或早就弹过不再弹）时，直接开设置页面。
+func (a *App) RequestAccessibility() {
+	first := a.axPrompted.CompareAndSwap(false, true)
+	if first {
+		logf("AXP prompt (first)")
+		go func() {
+			trusted := paste.PromptTrust()
+			logf("AXP prompt returned trusted=%v", trusted)
+		}()
+		return
+	}
+	logf("AXP open settings (already prompted)")
+	openAccessibilitySettings()
 }
 
 // PanelView 是面板的视图函数（给 ui.View 用）。

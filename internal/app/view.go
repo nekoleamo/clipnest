@@ -70,15 +70,8 @@ func (a *App) panelView(c *ui.Context) {
 					logf("RECT grant x=%.0f y=%.0f w=%.0f h=%.0f", b.X, b.Y, b.W, b.H)
 				}
 				if grantBtn.Clicked() {
-					logf("AXP click")
-					// 先收起面板：它是 floating window，会把刚打开的系统设置盖住
-					a.Dismiss()
-					// 授权提示走另一个 goroutine：万一系统调用卡住，不连带卡死 UI
-					go func() {
-						trusted := paste.PromptTrust()
-						logf("AXP prompt trusted=%v", trusted)
-					}()
-					openAccessibilitySettings()
+					a.Dismiss() // 面板是 layer=3 的浮动窗，先收起来别抢镜头
+					a.RequestAccessibility()
 				}
 			})
 		}
