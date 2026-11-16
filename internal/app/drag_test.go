@@ -148,6 +148,13 @@ func TestKeyboardMoveScrollsSelectionIntoView(t *testing.T) {
 	if total != 60 || sel != 25 {
 		t.Fatalf("选中位置不对：sel=%d total=%d", sel, total)
 	}
+	// 改窗口尺寸：视口变矮后，选中行仍要在可视区内
+	tester.SetSize(720, 320)
+	tester.Frame()
+	tester.Frame()
+	if a.listViewH > 300 {
+		t.Fatalf("视口高度没跟着窗口变：%.0f", a.listViewH)
+	}
 	if a.ListScroll.Y <= 0 {
 		t.Fatalf("列表没滚动：Y=%.1f（视口高 %.0f）", a.ListScroll.Y, a.listViewH)
 	}

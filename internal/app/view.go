@@ -96,11 +96,15 @@ func (a *App) panelView(c *ui.Context) {
 		// 布局跟着面板宽度走：窄了先去掉条数、再收窄预览、最后只留列表
 		l := layoutFor(c.Root().Bounds().W)
 
-		a.searchField(c, &after)
-		a.filterBar(c, &after, l)
-		a.bindKeys(c, &after)
+		if sb := a.searchField(c, &after).Bounds(); os.Getenv("CLIPNEST_DEBUG_RECTS") != "" {
+			logf("DBG search=(%.1f,%.1f,%.1fx%.1f)", sb.X, sb.Y, sb.W, sb.H)
+		}
+		if fb := a.filterBar(c, &after, l).Bounds(); os.Getenv("CLIPNEST_DEBUG_RECTS") != "" {
+			logf("DBG filter=(%.1f,%.1f,%.1fx%.1f)", fb.X, fb.Y, fb.W, fb.H)
+		}
+		a.bindKeys(root, c, &after)
 
-		ui.Row(c).Fill().Gap(8).Children(func() {
+		ui.Row(c).Grow(1).Gap(8).Children(func() {
 			a.listView(c, &after)
 			if l.showPreview {
 				a.previewView(c, &after, l)
@@ -126,7 +130,7 @@ func (a *App) panelView(c *ui.Context) {
 }
 
 // searchField 是搜索框（首次显示自动聚焦）。
-func (a *App) searchField(c *ui.Context, after *[]func()) {
+func (a *App) searchField(c *ui.Context, after *[]func()) ui.Element {
 	th := c.Theme()
 	q := a.Query()
 	in := ui.TextInput(c, &q).
@@ -149,6 +153,7 @@ func (a *App) searchField(c *ui.Context, after *[]func()) {
 			}
 		})
 	}
+	return in
 }
 
 // panelLayout 是依面板宽度算出来的布局取舍。
@@ -185,7 +190,7 @@ func layoutFor(w float32) panelLayout {
 }
 
 // filterBar 是搜索框下面那排筛选：类型分段 + 分组下拉。
-func (a *App) filterBar(c *ui.Context, after *[]func(), l panelLayout) {
+func (a *App) filterBar(c *ui.Context, after *[]func(), l panelLayout) ui.Element {
 	th := c.Theme()
 	kind, groupNow := a.FilterState()
 
@@ -195,7 +200,7 @@ func (a *App) filterBar(c *ui.Context, after *[]func(), l panelLayout) {
 		labels = []string{"全部", "★", "📌", "图", "件"}
 	}
 	// 这一行留白处可以拖着走（frameless 面板没有标题栏）
-	bar := ui.Row(c).Fill().Gap(8).AlignItems(ui.Center).DragWindow()
+	bar := ui.Row(c).Height(26).Gap(8).AlignItems(ui.Center).DragWindow()
 	bar.Children(func() {
 		if ui.Segmented(c, &kindNow, labels...).Changed() {
 			k := kindNow
@@ -242,10 +247,11 @@ func (a *App) filterBar(c *ui.Context, after *[]func(), l panelLayout) {
 		// 剩下的空白当窗口拖拽把手（比手指还好用，且点不到任何控件）
 		ui.Box(c).Grow(1).FillHeight().DragWindow()
 	})
+	return bar
 }
 
 // bindKeys 绑定面板的键盘动作（焦点在搜索框里也要能生效）。
-func (a *App) bindKeys(c *ui.Context, after *[]func()) {
+func (a *App) bindKeys(root ui.Element, c *ui.Context, after *[]func()) {
 	rowAction := func(fn func(Row) bool) func() {
 		return func() {
 			if row, ok := a.Selected(); ok {
@@ -254,18 +260,18 @@ func (a *App) bindKeys(c *ui.Context, after *[]func()) {
 		}
 	}
 
-	c.OnWindowShortcut(0, ui.KeyEscape, func() { a.Dismiss() })
-	c.OnWindowShortcut(0, ui.KeyDown, func() { a.Move(1) })
-	c.OnWindowShortcut(0, ui.KeyUp, func() { a.Move(-1) })
-	c.OnWindowShortcut(0, ui.KeyRight, func() { a.Move(1) })
-	c.OnWindowShortcut(0, ui.KeyLeft, func() { a.Move(-1) })
+	root.OnShortcut(0, ui.KeyEscape, func() { a.Dismiss() })
+	root.OnShortcut(0, ui.KeyDown, func() { a.Move(1) })
+	root.OnShortcut(0, ui.KeyUp, func() { a.Move(-1) })
+	root.OnShortcut(0, ui.KeyRight, func() { a.Move(1) })
+	root.OnShortcut(0, ui.KeyLeft, func() { a.Move(-1) })
 
-	c.OnWindowShortcut(ui.Cmd, ui.KeyD, rowAction(func(r Row) bool { return a.Remove(r) }))
-	c.OnWindowShortcut(ui.Cmd, ui.KeyP, rowAction(func(r Row) bool { return a.ToggleFlag(r, FlagPinned) }))
-	c.OnWindowShortcut(ui.Cmd, ui.KeyS, rowAction(func(r Row) bool { return a.ToggleFlag(r, FlagFavorite) }))
-	c.OnWindowShortcut(ui.Cmd, ui.KeyE, rowAction(func(r Row) bool { return a.ToggleFlag(r, FlagSensitive) }))
-	c.OnWindowShortcut(ui.Cmd, ui.KeyY, rowAction(func(r Row) bool { return a.Copy(r) }))
-	c.OnWindowShortcut(ui.Cmd, ui.KeyO, rowAction(func(r Row) bool {
+	root.OnShortcut(ui.Cmd, ui.KeyD, rowAction(func(r Row) bool { return a.Remove(r) }))
+	root.OnShortcut(ui.Cmd, ui.KeyP, rowAction(func(r Row) bool { return a.ToggleFlag(r, FlagPinned) }))
+	root.OnShortcut(ui.Cmd, ui.KeyS, rowAction(func(r Row) bool { return a.ToggleFlag(r, FlagFavorite) }))
+	root.OnShortcut(ui.Cmd, ui.KeyE, rowAction(func(r Row) bool { return a.ToggleFlag(r, FlagSensitive) }))
+	root.OnShortcut(ui.Cmd, ui.KeyY, rowAction(func(r Row) bool { return a.Copy(r) }))
+	root.OnShortcut(ui.Cmd, ui.KeyO, rowAction(func(r Row) bool {
 		if file, err := a.Export(r); err != nil {
 			a.SetStatus("❌ " + err.Error())
 		} else {
@@ -280,7 +286,7 @@ func (a *App) bindKeys(c *ui.Context, after *[]func()) {
 		if key == ui.KeyUnknown {
 			continue
 		}
-		c.OnWindowShortcut(ui.Cmd, key, func() {
+		root.OnShortcut(ui.Cmd, key, func() {
 			if a.SelectSlot(slot) {
 				if row, ok := a.RowAt(slot); ok {
 					a.Paste(row)
@@ -300,9 +306,22 @@ func (a *App) listView(c *ui.Context, after *[]func()) {
 	var accY float32
 	var selTop, selH float32
 	ui.Column(c).Fill().Children(func() {
-		scroll := ui.Scroll(c).Fill().TrackScroll(&a.ListScroll)
-		if b := scroll.Bounds(); b.H > 0 {
+		scroll := ui.Scroll(c).Grow(1).TrackScroll(&a.ListScroll)
+		b := scroll.Bounds()
+		if b.H > 0 {
+			// 窗口被拖动放大/缩小时视口会变：重新保证选中行露出来
+			if a.listViewH != 0 && b.H != a.listViewH {
+				a.requestScrollToSelection()
+			}
 			a.listViewH = b.H
+		}
+		if os.Getenv("CLIPNEST_DEBUG_RECTS") != "" {
+			_, wh := 0, 0
+			if w := a.panelWindow(); w != nil {
+				_, wh = w.Size()
+			}
+			logf("DBG bounds scroll=(%.1f,%.1f,%.1fx%.1f) winH=%d viewH=%.1f",
+				b.X, b.Y, b.W, b.H, wh, a.listViewH)
 		}
 		scroll.Children(func() {
 			ui.Column(c).Fill().Gap(2).Children(func() {
@@ -373,6 +392,10 @@ func (a *App) listView(c *ui.Context, after *[]func()) {
 				}
 				if len(rows) > 0 && a.takeScrollToSelection() {
 					a.scrollSelectionIntoView(selTop, selH)
+					if os.Getenv("CLIPNEST_DEBUG_RECTS") != "" {
+						logf("DBG scroll sel=%d top=%.1f h=%.1f view=%.1f y=%.1f maxY=%.1f",
+							sel, selTop, selH, a.listViewH, a.ListScroll.Y, a.ListScroll.MaxY)
+					}
 				}
 				if len(rows) == 0 {
 					title, hint := emptyState(a.Query())
