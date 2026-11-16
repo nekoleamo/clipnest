@@ -409,79 +409,164 @@ func (a *App) listView(c *ui.Context, after *[]func()) {
 	})
 }
 
-// previewView 是右栏大图预览（不是图片条目时给元信息）。
+// previewView 是右栏：一张卡片，从上到下是头部、内容、属性、备注、动作。
+//
+// 排版原则：卡片底色与列表行区分层次；头部一行给出类型/时间/次数；
+// 内容区限高，备注吃掉剩余高度——列再高也不会显得空。
 func (a *App) previewView(c *ui.Context, after *[]func(), l panelLayout) {
 	th := c.Theme()
 	row, ok := a.Selected()
-	ui.Column(c).Width(l.previewW).FillHeight().Gap(6).Children(func() {
+
+	card := ui.Column(c).Width(l.previewW).FillHeight().Gap(8).
+		Padding(12).Radius(10).Background(th.Surface).Justify(ui.Start)
+	card.Children(func() {
 		if !ok {
+			ui.Column(c).Fill().Justify(ui.Center).AlignItems(ui.Center).Gap(4).Children(func() {
+				ui.Text(c, "没有选中条目").FontSize(12).TextColor(th.TextMuted)
+				ui.Text(c, "用 ↑↓ 或点击左侧列表").FontSize(11).TextColor(th.TextMuted)
+			})
 			return
 		}
-		if row.OriginPath != "" {
-			if b := bitmapFor(row.OriginPath); b != nil {
-				w, h := fitSize(row.Width, row.Height, l.previewW, 320)
-				ui.Image(c, b).Size(w, h).Fit(ui.Contain).Radius(8)
-			} else {
-				ui.Text(c, "⚠️ 原图读不出来（文件可能已被清理）").FontSize(11).TextColor(th.Warning)
-			}
-		} else if row.Kind == model.KindImage {
-			ui.Text(c, "⚠️ 原图文件缺失").FontSize(11).TextColor(th.Warning)
+
+		if os.Getenv("CLIPNEST_DEBUG_RECTS") != "" {
+			hb := a.previewHeader(c, row, th).Bounds()
+			logf("DBG pv header=(%.1f,%.1f,%.1fx%.1f) card=(%.1fx%.1f)", hb.X, hb.Y, hb.W, hb.H, card.Bounds().W, card.Bounds().H)
+		} else {
+			a.previewHeader(c, row, th)
 		}
-		meta := fmt.Sprintf("%s · %s", row.Tag, row.Time)
+
+		// 内容：图片整张看，文本限高滚动看
+		switch {
+		case row.Kind == model.KindImage:
+			a.previewImage(c, row, l, th)
+		case row.Kind == model.KindText || row.Kind == model.KindHtml || row.Kind == model.KindRtf:
+			// 只看个大概：截断显示，不做内嵌滚动（长文本来回滚也没人看）
+			if content := excerpt(row.Content, 220); content != "" {
+				a.summaryText(c, content, a.Query(), th.Text, th).FontSize(12).Wrap()
+			}
+		case row.Kind == model.KindFiles:
+			ui.Text(c, excerpt(row.Content, 300)).FontSize(11).TextColor(th.TextMuted).Wrap()
+		}
+
+		ui.Divider(c)
+		a.previewGroup(c, row, after, th)
+
+		// 备注吃掉剩下的高度，卡片自然填满
+		ui.Row(c).Height(16).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "备注").FontSize(11).TextColor(th.TextMuted).Width(40)
+			if n := len([]rune(row.Note)); n > 0 {
+				ui.Text(c, fmt.Sprintf("%d 字", n)).FontSize(10).TextColor(th.TextMuted)
+			}
+		})
+		note := a.NoteValue(row.ID, row.Note)
+		if ui.TextArea(c, note).Grow(1).MinHeight(72).FontSize(11).
+			Placeholder("写点什么，比如这条以后怎么找…").Changed() {
+			text := *note
+			*after = append(*after, func() { a.SaveNote(row.ID, text) })
+		}
+
+		// 动作：和键盘快捷键对应，省得去记
+		ui.Row(c).Height(28).Gap(6).Children(func() {
+			if ui.Button(c, "复制").FontSize(11).Clicked() {
+				r := row
+				*after = append(*after, func() { a.Copy(r) })
+			}
+			if ui.Button(c, "导出").FontSize(11).Clicked() {
+				r := row
+				*after = append(*after, func() {
+					if file, err := a.Export(r); err != nil {
+						a.SetStatus("❌ " + err.Error())
+					} else {
+						a.SetStatus("已导出 " + baseName(file) + "（⌘V 可粘文件）")
+					}
+				})
+			}
+			ui.Text(c, "⌘Y / ⌘O").FontSize(10).TextColor(th.TextMuted)
+		})
+	})
+}
+
+// previewHeader 是卡片顶部：类型胶囊 + 时间/次数 + 标记。
+func (a *App) previewHeader(c *ui.Context, row Row, th *ui.Theme) ui.Element {
+	head := ui.Row(c).Fill().Height(20).Gap(6).AlignItems(ui.Center)
+	head.Children(func() {
+		ui.Badge(c, row.Tag)
+		meta := row.Time
 		if row.UseCount > 1 {
 			meta += fmt.Sprintf(" · 用过 %d 次", row.UseCount)
 		}
 		ui.Text(c, meta).FontSize(11).TextColor(th.TextMuted)
-		if row.Width > 0 && row.Height > 0 {
-			ui.Text(c, fmt.Sprintf("%d×%d", row.Width, row.Height)).FontSize(11).TextColor(th.TextMuted)
+		ui.Box(c).Grow(1)
+		mark := ""
+		if row.Pinned {
+			mark += "📌"
 		}
-
-		// 文本类条目：直接看内容（命中的关键词高亮）
-		if row.Kind == model.KindText || row.Kind == model.KindHtml || row.Kind == model.KindRtf {
-			if content := excerpt(row.Content, 240); content != "" {
-				a.summaryText(c, content, a.Query(), th.TextMuted, th).FontSize(11).Wrap()
-			}
+		if row.Favorite {
+			mark += "★"
 		}
-
-		// 分组：直接给这条选一个组（组在设置窗里建）
-		groups := a.Groups()
-		names := make([]string, 0, len(groups)+1)
-		names = append(names, "未分组")
-		for _, g := range groups {
-			names = append(names, g.Name)
+		if row.Sensitive {
+			mark += "🔒"
 		}
-		current := "未分组"
-		if row.GroupName != "" {
-			current = row.GroupName
-		}
-		choice := current
-		ui.Row(c).Fill().Gap(6).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "分组").FontSize(10).TextColor(th.TextMuted)
-			ui.Select(c, &choice, names).Width(150)
-		})
-		if choice != current {
-			pick := choice
-			*after = append(*after, func() {
-				var gid *int64
-				for _, g := range groups {
-					if g.Name == pick {
-						id := g.ID
-						gid = &id
-						break
-					}
-				}
-				a.MoveToGroup(row.ID, gid)
-			})
-		}
-
-		// 备注：改完立刻落库（契约 6：不刷新 updated_at）
-		ui.Text(c, "备注").FontSize(10).TextColor(th.TextMuted)
-		note := a.NoteValue(row.ID, row.Note)
-		if ui.TextArea(c, note).Height(64).FontSize(11).Changed() {
-			text := *note
-			*after = append(*after, func() { a.SaveNote(row.ID, text) })
+		if mark != "" {
+			ui.Text(c, mark).FontSize(11).TextColor(th.Accent)
 		}
 	})
+	return head
+}
+
+// previewImage 居中显示原图，下面标尺寸。
+func (a *App) previewImage(c *ui.Context, row Row, l panelLayout, th *ui.Theme) {
+	if row.OriginPath == "" {
+		ui.Text(c, "⚠️ 原图文件缺失").FontSize(11).TextColor(th.Warning)
+		return
+	}
+	b := bitmapFor(row.OriginPath)
+	if b == nil {
+		ui.Text(c, "⚠️ 原图读不出来（文件可能已被清理）").FontSize(11).TextColor(th.Warning)
+		return
+	}
+	maxW := l.previewW - 24
+	w, h := fitSize(row.Width, row.Height, maxW, 300)
+	ui.Column(c).Grow(1).Justify(ui.Center).AlignItems(ui.Center).Gap(6).Children(func() {
+		ui.Image(c, b).Size(w, h).Fit(ui.Contain).Radius(8)
+		if row.Width > 0 && row.Height > 0 {
+			ui.Text(c, fmt.Sprintf("%d × %d", row.Width, row.Height)).
+				FontSize(10).TextColor(th.TextMuted)
+		}
+	})
+}
+
+// previewGroup 是「分组」一行：标签固定宽度，下拉占满剩余。
+func (a *App) previewGroup(c *ui.Context, row Row, after *[]func(), th *ui.Theme) {
+	groups := a.Groups()
+	names := make([]string, 0, len(groups)+1)
+	names = append(names, "未分组")
+	for _, g := range groups {
+		names = append(names, g.Name)
+	}
+	current := "未分组"
+	if row.GroupName != "" {
+		current = row.GroupName
+	}
+	choice := current
+	ui.Row(c).Fill().Height(28).Gap(8).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, "分组").FontSize(11).TextColor(th.TextMuted).Width(40)
+		ui.Select(c, &choice, names).Grow(1)
+	})
+	if choice != current {
+		pick := choice
+		*after = append(*after, func() {
+			var gid *int64
+			for _, g := range groups {
+				if g.Name == pick {
+					id := g.ID
+					gid = &id
+					break
+				}
+			}
+			a.MoveToGroup(row.ID, gid)
+		})
+	}
 }
 
 // summaryText 是带搜索高亮的文本：命中 query 的片段用强调色 + 加粗。
