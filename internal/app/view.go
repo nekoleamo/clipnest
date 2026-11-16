@@ -56,13 +56,7 @@ func (a *App) panelView(c *ui.Context) {
 	th := c.Theme()
 	// 面板是自绘的浮动窗：菜单也用窗口内画的那种，跟整体观感一致，
 	// 而且不依赖 app 是否在前台（系统菜单在非激活的 accessory app 里弹不出来）
-	c.SetMenuPresentation(ui.PopoverMenus)
-	var after []func()
-	applyAfter := func() {
-		for _, fn := range after {
-			fn()
-		}
-	}
+	// c.SetMenuPresentation(ui.PopoverMenus)
 
 	root := ui.Column(c).Fill().Gap(8).Padding(8).Background(th.Background)
 	root.Children(func() {
@@ -99,18 +93,18 @@ func (a *App) panelView(c *ui.Context) {
 		// 布局跟着面板宽度走：窄了先去掉条数、再收窄预览、最后只留列表
 		l := layoutFor(c.Root().Bounds().W)
 
-		if sb := a.searchField(c, &after).Bounds(); os.Getenv("CLIPNEST_DEBUG_RECTS") != "" {
+		if sb := a.searchField(c).Bounds(); os.Getenv("CLIPNEST_DEBUG_RECTS") != "" {
 			logf("DBG search=(%.1f,%.1f,%.1fx%.1f)", sb.X, sb.Y, sb.W, sb.H)
 		}
-		if fb := a.filterBar(c, &after, l).Bounds(); os.Getenv("CLIPNEST_DEBUG_RECTS") != "" {
+		if fb := a.filterBar(c, l).Bounds(); os.Getenv("CLIPNEST_DEBUG_RECTS") != "" {
 			logf("DBG filter=(%.1f,%.1f,%.1fx%.1f)", fb.X, fb.Y, fb.W, fb.H)
 		}
-		a.bindKeys(root, c, &after)
+		a.bindKeys(root, c)
 
 		ui.Row(c).Grow(1).Gap(8).Children(func() {
-			a.listView(c, &after)
+			a.listView(c)
 			if l.showPreview {
-				a.previewView(c, &after, l)
+				a.previewView(c, l)
 			}
 		})
 
@@ -129,11 +123,11 @@ func (a *App) panelView(c *ui.Context) {
 		ui.Text(c, footer).FontSize(11).TextColor(th.Text)
 	})
 
-	applyAfter()
+	a.runPending()
 }
 
 // searchField 是搜索框（首次显示自动聚焦）。
-func (a *App) searchField(c *ui.Context, after *[]func()) ui.Element {
+func (a *App) searchField(c *ui.Context) ui.Element {
 	th := c.Theme()
 	q := a.Query()
 	in := ui.TextInput(c, &q).
@@ -145,12 +139,14 @@ func (a *App) searchField(c *ui.Context, after *[]func()) ui.Element {
 		TextColor(th.Text).
 		PlaceholderColor(th.TextMuted).
 		CaretColor(th.Text).
-		AutoFocus()
+		AutoFocus().
+		Bind(&a.searchInput)
+	a.bindSearchInput(&a.searchInput, c)
 	if in.Changed() {
-		*after = append(*after, func() { a.SetQuery(q) })
+		a.later(func() { a.SetQuery(q) })
 	}
 	if in.Submitted() {
-		*after = append(*after, func() {
+		a.later(func() {
 			if row, ok := a.Selected(); ok {
 				a.Paste(row)
 			}
@@ -193,7 +189,7 @@ func layoutFor(w float32) panelLayout {
 }
 
 // filterBar 是搜索框下面那排筛选：类型分段 + 分组下拉。
-func (a *App) filterBar(c *ui.Context, after *[]func(), l panelLayout) ui.Element {
+func (a *App) filterBar(c *ui.Context, l panelLayout) ui.Element {
 	th := c.Theme()
 	kind, groupNow := a.FilterState()
 
@@ -207,7 +203,7 @@ func (a *App) filterBar(c *ui.Context, after *[]func(), l panelLayout) ui.Elemen
 	bar.Children(func() {
 		if ui.Segmented(c, &kindNow, labels...).Changed() {
 			k := kindNow
-			*after = append(*after, func() { a.SetKindFilter(k) })
+			a.later(func() { a.SetKindFilter(k) })
 		}
 		groups := a.Groups()
 		if len(groups) > 0 {
@@ -232,7 +228,7 @@ func (a *App) filterBar(c *ui.Context, after *[]func(), l panelLayout) ui.Elemen
 			ui.Select(c, &choice, names).Width(selW)
 			if choice != current {
 				pick := choice
-				*after = append(*after, func() {
+				a.later(func() {
 					switch pick {
 					case "全部分组":
 						a.SetGroupFilter("")
@@ -254,7 +250,7 @@ func (a *App) filterBar(c *ui.Context, after *[]func(), l panelLayout) ui.Elemen
 }
 
 // bindKeys 绑定面板的键盘动作（焦点在搜索框里也要能生效）。
-func (a *App) bindKeys(root ui.Element, c *ui.Context, after *[]func()) {
+func (a *App) bindKeys(root ui.Element, c *ui.Context) {
 	rowAction := func(fn func(Row) bool) func() {
 		return func() {
 			if row, ok := a.Selected(); ok {
@@ -300,7 +296,7 @@ func (a *App) bindKeys(root ui.Element, c *ui.Context, after *[]func()) {
 }
 
 // listView 是左栏列表。
-func (a *App) listView(c *ui.Context, after *[]func()) {
+func (a *App) listView(c *ui.Context) {
 	th := c.Theme()
 	q := a.Query()
 	rows := a.Rows()
@@ -346,7 +342,8 @@ func (a *App) listView(c *ui.Context, after *[]func()) {
 						Padding(6, 4).
 						Background(bg).
 						OnClick(func() {
-							*after = append(*after, func() { a.Select(index) })
+							// 点完之后把焦点还给搜索框：否则方向键会被滚动容器拿去滚列表
+							a.later(func() { a.Select(index); a.refocusSearch() })
 						}).
 						// 按住往窗口外拖 = 拖拽导出（文本给纯文本，图片/文件给文件）
 						DragDataFrom(func() transfer.Data { return a.DragData(rowID) })
@@ -386,6 +383,9 @@ func (a *App) listView(c *ui.Context, after *[]func()) {
 								mark += "🔒 "
 							}
 							a.summaryText(c, mark+row.Summary, q, fg, th).FontSize(12).TextColor(fg).Grow(1).Ellipsis("…").
+								OnClick(func() {
+									a.later(func() { a.Select(index); a.refocusSearch() })
+								}).
 								ContextMenu(func(m *ui.Menu) { a.rowMenu(m, row) })
 							if row.UseCount > 1 {
 								ui.Text(c, fmt.Sprintf("×%d", row.UseCount)).FontSize(9).TextColor(fg)
@@ -417,7 +417,7 @@ func (a *App) listView(c *ui.Context, after *[]func()) {
 //
 // 排版原则：卡片底色与列表行区分层次；头部一行给出类型/时间/次数；
 // 内容区限高，备注吃掉剩余高度——列再高也不会显得空。
-func (a *App) previewView(c *ui.Context, after *[]func(), l panelLayout) {
+func (a *App) previewView(c *ui.Context, l panelLayout) {
 	th := c.Theme()
 	row, ok := a.Selected()
 
@@ -457,7 +457,7 @@ func (a *App) previewView(c *ui.Context, after *[]func(), l panelLayout) {
 		}
 
 		ui.Divider(c)
-		a.previewGroup(c, row, after, th)
+		a.previewGroup(c, row, th)
 
 		// 备注吃掉剩下的高度，卡片自然填满
 		ui.Row(c).Height(16).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -473,18 +473,18 @@ func (a *App) previewView(c *ui.Context, after *[]func(), l panelLayout) {
 		if ui.TextArea(c, note).Grow(1).MinHeight(72).FontSize(11).
 			Placeholder("写点什么，比如这条以后怎么找…").Changed() {
 			text := *note
-			*after = append(*after, func() { a.SaveNote(row.ID, text) })
+			a.later(func() { a.SaveNote(row.ID, text) })
 		}
 
 		// 动作：和键盘快捷键对应，省得去记
 		ui.Row(c).Height(30).Gap(6).Children(func() {
 			iconAction(c, th, IconCopy, "复制", func() {
 				r := row
-				*after = append(*after, func() { a.Copy(r) })
+				a.later(func() { a.Copy(r) })
 			})
 			iconAction(c, th, IconExport, "导出", func() {
 				r := row
-				*after = append(*after, func() {
+				a.later(func() {
 					if file, err := a.Export(r); err != nil {
 						a.SetStatus("❌ " + err.Error())
 					} else {
@@ -580,7 +580,7 @@ func (a *App) previewImage(c *ui.Context, row Row, l panelLayout, th *ui.Theme) 
 }
 
 // previewGroup 是「分组」一行：标签固定宽度，下拉占满剩余。
-func (a *App) previewGroup(c *ui.Context, row Row, after *[]func(), th *ui.Theme) {
+func (a *App) previewGroup(c *ui.Context, row Row, th *ui.Theme) {
 	groups := a.Groups()
 	names := make([]string, 0, len(groups)+1)
 	names = append(names, "未分组")
@@ -598,7 +598,7 @@ func (a *App) previewGroup(c *ui.Context, row Row, after *[]func(), th *ui.Theme
 	})
 	if choice != current {
 		pick := choice
-		*after = append(*after, func() {
+		a.later(func() {
 			var gid *int64
 			for _, g := range groups {
 				if g.Name == pick {

@@ -90,6 +90,22 @@ func main() {
 		})
 		a.SetPrefsWindow(prefs)
 
+		// 大图预览窗口：点右栏图片时显示（窗口只在启动阶段建，帧回调里建不安全）
+		preview := mygo.NewWindow(mygo.WindowOptions{
+			Title:     "clipnest 预览",
+			Width:     600,
+			Height:    480,
+			MinWidth:  200,
+			MinHeight: 160,
+			Hidden:    true,
+			Content:   ui.View(a.ImageView),
+		})
+		preview.OnClose(func(e *mygo.CloseEvent) {
+			e.PreventDefault()
+			preview.Hide()
+		})
+		a.SetImageWindow(preview)
+
 		// 托盘
 		if _, err := a.AttachTray(trayIcon()); err != nil {
 			log.Printf("托盘创建失败：%v", err)

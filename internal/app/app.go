@@ -80,6 +80,17 @@ type App struct {
 	axPrompted atomic.Bool
 	// dragProbe 只在测试里用：拖拽开始时把载荷交出去断言
 	dragProbe func(transfer.Data)
+	// imageWin/imageRow 是「点预览图放大看」的独立窗口
+	imageWin *mygo.Window
+	imageRow Row
+	// pending 是本帧要延后执行的动作（改动数据、发命令），由 runPending 统一跑
+	pending []func()
+	// searchInput 是搜索框的句柄：点过列表后把焦点还给它，
+	// 这样方向键仍然走面板快捷键，而不会被滚动容器吃掉
+	searchInput ui.Handle
+	searchCtx   *ui.Context
+	// focusSearchNext 让下一次渲染把焦点放回搜索框
+	focusSearchNext bool
 	// scrollToSel 是一次性的「把选中行滚进可视区」请求（键盘移动时置位）
 	scrollToSel bool
 	// ListScroll 是列表的滚动位置（视图里 TrackScroll 绑定它）
@@ -394,6 +405,43 @@ func (a *App) scrollSelectionIntoView(top, height float32) {
 	case top+height > y+view:
 		a.ListScroll.Y = top + height - view
 	}
+}
+
+// later 把一个动作排到本帧构建结束后执行。
+//
+// 注意：不能用「每帧的局部 slice」，因为点击/菜单回调是在**下一帧**构建时执行的，
+// 那时上一帧的局部 slice 早被丢掉了，动作会静默丢失（症状：点了列表不选中、列表乱跳）。
+func (a *App) later(fn func()) {
+	a.mu.Lock()
+	a.pending = append(a.pending, fn)
+	a.mu.Unlock()
+}
+
+// runPending 跑掉排好的动作（本帧构建结束时调用）。
+func (a *App) runPending() {
+	a.mu.Lock()
+	fns := a.pending
+	a.pending = nil
+	a.mu.Unlock()
+	for _, fn := range fns {
+		fn()
+	}
+}
+
+// bindSearchInput 记下搜索框句柄与当前渲染上下文。
+func (a *App) bindSearchInput(h *ui.Handle, c *ui.Context) {
+	a.mu.Lock()
+	a.searchInput = *h
+	a.searchCtx = c
+	a.mu.Unlock()
+}
+
+// refocusSearch 把键盘焦点还给搜索框（点过列表之后调用）。
+func (a *App) refocusSearch() {
+	if a.searchCtx == nil {
+		return
+	}
+	a.searchInput.Focus(a.searchCtx)
 }
 
 // requestScrollToSelection 让下一次渲染把选中行滚进可视区（一次性）。
@@ -859,7 +907,15 @@ func (a *App) Show() {
 		y = d.WorkArea.Y + d.WorkArea.Height - height - 24
 	}
 	w.SetPosition(d.WorkArea.X+(d.WorkArea.Width-width)/2, y)
+	// 唤出时置顶；1.2 秒后降回普通层级，这样它不会一直压着别的窗口，
+	// 但下次按快捷键唤出又会重新置顶。
+	w.SetAlwaysOnTop(true)
 	w.Show()
+	time.AfterFunc(1200*time.Millisecond, func() {
+		if w.IsVisible() {
+			w.SetAlwaysOnTop(false)
+		}
+	})
 
 	// Windows 上面板是前台窗口才收得到键盘；macOS 上 NSPanel 自己就是 key window。
 	if !paste.ClaimForeground() {
