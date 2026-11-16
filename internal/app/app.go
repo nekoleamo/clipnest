@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 
 	"clipnest/internal/clip"
@@ -75,6 +76,8 @@ type App struct {
 	debounce   *time.Timer
 	// axPrompted 记录辅助功能提示是否已弹过
 	axPrompted atomic.Bool
+	// dragProbe 只在测试里用：拖拽开始时把载荷交出去断言
+	dragProbe func(transfer.Data)
 	// kindFilter 是顶部筛选：0 全部 / 1 收藏 / 2 置顶 / 3 图片 / 4 文件
 	kindFilter int
 	// groupFilter 是分组筛选："" 全部、"\x00" 未分组、其它为分组名
@@ -677,6 +680,74 @@ func (a *App) Export(row Row) (string, error) {
 	logf("EXPORT id=%d files=%v", item.ID, files)
 	paste.ClaimForeground()
 	return files[0], nil
+}
+
+// DragData 是拖拽导出用的载荷：图片与文件给文件 URL，文本给纯文本。
+//
+// 图片给的是 origin 里的真文件（拖出去默认是复制，原文件不会被动）。
+func (a *App) DragData(id int64) transfer.Data {
+	data := a.dragData(id)
+	if a.dragProbe != nil {
+		a.dragProbe(data)
+	}
+	return data
+}
+
+// dragData 是 DragData 的实际实现（probe 不影响它）。
+func (a *App) dragData(id int64) transfer.Data {
+	item, ok, err := db.Get(a.Store.DB, id)
+	if err != nil || !ok {
+		return transfer.Data{}
+	}
+	switch item.Kind {
+	case model.KindFiles:
+		var paths []string
+		for _, line := range strings.Split(item.Content, "\n") {
+			if line != "" && fileExists(line) {
+				paths = append(paths, line)
+			}
+		}
+		if len(paths) == 0 {
+			a.SetStatus("❌ 文件条目里的路径都不在了")
+			return transfer.Data{}
+		}
+		data, err := transfer.FileData(paths...)
+		if err != nil {
+			logf("DRAG files failed: %v", err)
+			return transfer.Data{}
+		}
+		logf("DRAG id=%d files=%d", item.ID, len(paths))
+		return data
+	case model.KindImage:
+		hash := strings.TrimSuffix(item.Content, ".png")
+		origin := a.Paths.ImageOrigin(hash)
+		if !fileExists(origin) {
+			a.SetStatus("❌ 原图文件缺失")
+			return transfer.Data{}
+		}
+		data, err := transfer.FileData(origin)
+		if err != nil {
+			logf("DRAG image failed: %v", err)
+			return transfer.Data{}
+		}
+		logf("DRAG id=%d image=%s", item.ID, hash)
+		return data
+	default:
+		// 文本：既给纯文本（拖进输入框就是内容），也落一个 .txt 文件（拖进 Finder 就是文件）
+		text := transfer.New(transfer.NewItem(transfer.Bytes(transfer.Text, []byte(item.Content))))
+		name := fmt.Sprintf("clipnest-%d.txt", item.ID)
+		dest := filepathJoin(a.Paths.Root(), "export", name)
+		if err := writeFile(dest, []byte(item.Content)); err != nil {
+			logf("DRAG text file failed: %v", err)
+			return text
+		}
+		files, err := transfer.FileData(dest)
+		if err != nil {
+			return text
+		}
+		logf("DRAG id=%d text=%d runes file=%s", item.ID, len([]rune(item.Content)), dest)
+		return transfer.New(append(text.Items(), files.Items()...)...)
+	}
 }
 
 func (a *App) exportDir() string {

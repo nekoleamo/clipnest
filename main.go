@@ -63,7 +63,10 @@ func main() {
 			Vibrancy:    mygo.VibrancyHUD,
 			Width:       settings.PanelWidth,
 			Height:      int(a.Settings.PanelHeight),
-			Content:     ui.View(a.PanelView),
+			// 缩到比这更小就排不开了（列表 + 右栏预览 + 底栏）
+			MinWidth:  settings.PanelWidth,
+			MinHeight: 300,
+			Content:   ui.View(a.PanelView),
 		})
 		// 关闭（Esc / ⌘W）当隐藏，下次唤起不用重建
 		panel.OnClose(func(e *mygo.CloseEvent) {
@@ -77,11 +80,13 @@ func main() {
 
 		// 设置窗
 		prefs := mygo.NewWindow(mygo.WindowOptions{
-			Title:   "clipnest 设置",
-			Width:   620,
-			Height:  720,
-			Hidden:  true,
-			Content: ui.View(a.PrefsView),
+			Title:     "clipnest 设置",
+			Width:     620,
+			Height:    720,
+			MinWidth:  520,
+			MinHeight: 420,
+			Hidden:    true,
+			Content:   ui.View(a.PrefsView),
 		})
 		a.SetPrefsWindow(prefs)
 

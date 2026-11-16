@@ -5,6 +5,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 
 	"clipnest/internal/model"
@@ -61,6 +62,19 @@ func (a *App) panelView(c *ui.Context) {
 
 	root := ui.Column(c).Fill().Gap(8).Padding(8).Background(th.Background)
 	root.Children(func() {
+		// 顶部这条空白就是标题栏：按住拖可以移动面板（DragWindow 只认「最深命中元素」）
+		// 顶部居中的小把手：按住可以拖面板（没有标题栏，靠它移动）
+		ui.Row(c).Fill().Height(8).Justify(ui.Center).Children(func() {
+			grip := ui.Box(c).Size(80, 14).Radius(4).Background(th.Surface)
+			if b := grip.Bounds(); b.W > 0 && os.Getenv("CLIPNEST_DEBUG_RECTS") != "" {
+				px, py := 0, 0
+				if w := a.panelWindow(); w != nil {
+					px, py = w.Position()
+				}
+				logf("RECT grip win=(%d,%d) x=%.0f y=%.0f w=%.0f h=%.0f", px, py, b.X, b.Y, b.W, b.H)
+			}
+			grip.DragWindow()
+		})
 		if !paste.Trusted() && !a.Settings.HideAccessibilityHint {
 			ui.Row(c).Fill().Gap(6).Children(func() {
 				ui.Text(c, "⚠️ 没有辅助功能授权，回车只复制不粘贴").
@@ -78,19 +92,28 @@ func (a *App) panelView(c *ui.Context) {
 				}
 			})
 		}
+		// 布局跟着面板宽度走：窄了先去掉条数、再收窄预览、最后只留列表
+		l := layoutFor(c.Root().Bounds().W)
+
 		a.searchField(c, &after)
-		a.filterBar(c, &after)
+		a.filterBar(c, &after, l)
 		a.bindKeys(c, &after)
 
 		ui.Row(c).Fill().Gap(8).Children(func() {
 			a.listView(c, &after)
-			a.previewView(c, &after)
+			if l.showPreview {
+				a.previewView(c, &after, l)
+			}
 		})
 
 		sel, total := a.Selection()
-		footer := Hints()
+		hints := Hints()
+		if l.compactHints {
+			hints = CompactHints()
+		}
+		footer := hints
 		if total > 0 {
-			footer = fmt.Sprintf("%d/%d · %s", min(sel, total-1)+1, total, Hints())
+			footer = fmt.Sprintf("%d/%d · %s", min(sel, total-1)+1, total, hints)
 		}
 		if status := a.Status(); status != "" {
 			footer = status + " · " + footer
@@ -127,14 +150,53 @@ func (a *App) searchField(c *ui.Context, after *[]func()) {
 	}
 }
 
+// panelLayout 是依面板宽度算出来的布局取舍。
+type panelLayout struct {
+	showPreview   bool    // 右栏预览
+	previewW      float32 // 预览栏宽度
+	showCount     bool    // 筛选栏右侧的「共 N 条」
+	compactFilter bool    // 筛选标签用短文案
+	compactHints  bool    // 底部提示用短文案
+}
+
+// layoutFor 按宽度决定放得下什么：720（默认）全给；窄了先省条数、再收预览，最后只留列表。
+func layoutFor(w float32) panelLayout {
+	l := panelLayout{showPreview: true, previewW: previewWidth, showCount: true}
+	switch {
+	case w < 500: // 只剩列表
+		l.showPreview = false
+		l.showCount = false
+		l.compactFilter = true
+		l.compactHints = true
+	case w < 620: // 预览很窄，筛选与提示都用短文案
+		l.previewW = 180
+		l.showCount = false
+		l.compactFilter = true
+		l.compactHints = true
+	case w < 700: // 预览收窄
+		l.previewW = 220
+		l.showCount = false
+		l.compactHints = true
+	case w < 780: // 默认宽度：只把底栏提示缩短
+		l.compactHints = true
+	}
+	return l
+}
+
 // filterBar 是搜索框下面那排筛选：类型分段 + 分组下拉。
-func (a *App) filterBar(c *ui.Context, after *[]func()) {
+func (a *App) filterBar(c *ui.Context, after *[]func(), l panelLayout) {
 	th := c.Theme()
 	kind, groupNow := a.FilterState()
 
 	kindNow := kind
-	ui.Row(c).Fill().Gap(8).AlignItems(ui.Center).Children(func() {
-		if ui.Segmented(c, &kindNow, "全部", "收藏", "置顶", "图片", "文件").Changed() {
+	labels := []string{"全部", "收藏", "置顶", "图片", "文件"}
+	if l.compactFilter {
+		labels = []string{"全部", "★", "📌", "图", "件"}
+	}
+	// 这一行留白处可以拖着走（frameless 面板没有标题栏）
+	bar := ui.Row(c).Fill().Gap(8).AlignItems(ui.Center).DragWindow()
+	bar.Children(func() {
+		if ui.Segmented(c, &kindNow, labels...).Changed() {
 			k := kindNow
 			*after = append(*after, func() { a.SetKindFilter(k) })
 		}
@@ -154,7 +216,11 @@ func (a *App) filterBar(c *ui.Context, after *[]func()) {
 				current = groupNow
 			}
 			choice := current
-			ui.Select(c, &choice, names).Width(140)
+			selW := float32(140)
+			if l.compactFilter {
+				selW = 100
+			}
+			ui.Select(c, &choice, names).Width(selW)
 			if choice != current {
 				pick := choice
 				*after = append(*after, func() {
@@ -169,7 +235,11 @@ func (a *App) filterBar(c *ui.Context, after *[]func()) {
 				})
 			}
 		}
-		ui.Text(c, fmt.Sprintf("共 %d 条", len(a.Rows()))).FontSize(10).TextColor(th.TextMuted).Grow(1)
+		if l.showCount {
+			ui.Text(c, fmt.Sprintf("共 %d 条", len(a.Rows()))).FontSize(10).TextColor(th.TextMuted)
+		}
+		// 剩下的空白当窗口拖拽把手（比手指还好用，且点不到任何控件）
+		ui.Box(c).Grow(1).FillHeight().DragWindow()
 	})
 }
 
@@ -240,41 +310,49 @@ func (a *App) listView(c *ui.Context, after *[]func()) {
 						fg = th.AccentText
 					}
 
-					ui.Column(c).Key(fmt.Sprintf("row-%d", row.ID)).
+					rowID := row.ID
+					rowEl := ui.Column(c).Key(fmt.Sprintf("row-%d", row.ID)).
 						Radius(6).
 						Padding(6, 4).
 						Background(bg).
 						OnClick(func() {
 							*after = append(*after, func() { a.Select(index) })
 						}).
-						Children(func() {
-							ui.Row(c).Fill().Gap(6).Children(func() {
-								if row.ThumbPath != "" {
-									if b := bitmapFor(row.ThumbPath); b != nil {
-										ui.Image(c, b).Size(thumbSize, thumbSize).Fit(ui.Contain).Radius(3)
-									}
+						// 按住往窗口外拖 = 拖拽导出（文本给纯文本，图片/文件给文件）
+						DragDataFrom(func() transfer.Data { return a.DragData(rowID) })
+					if index == 0 && os.Getenv("CLIPNEST_DEBUG_RECTS") != "" {
+						if b := rowEl.Bounds(); b.W > 0 {
+							logf("RECT row0 x=%.0f y=%.0f w=%.0f h=%.0f", b.X, b.Y, b.W, b.H)
+						}
+					}
+					rowEl.Children(func() {
+						ui.Row(c).Fill().Gap(6).Children(func() {
+							if row.ThumbPath != "" {
+								if b := bitmapFor(row.ThumbPath); b != nil {
+									ui.Image(c, b).Size(thumbSize, thumbSize).Fit(ui.Contain).Radius(3)
 								}
-								if index < 9 {
-									ui.Text(c, Slot(index)).FontSize(9).TextColor(fg)
-								}
-								ui.Text(c, row.Tag).FontSize(10).TextColor(fg)
-								mark := ""
-								if row.Pinned {
-									mark += "📌 "
-								}
-								if row.Favorite {
-									mark += "★ "
-								}
-								if row.Sensitive {
-									mark += "🔒 "
-								}
-								ui.Text(c, mark+row.Summary).FontSize(12).TextColor(fg).Grow(1).Ellipsis("…")
-								if row.UseCount > 1 {
-									ui.Text(c, fmt.Sprintf("×%d", row.UseCount)).FontSize(9).TextColor(fg)
-								}
-								ui.Text(c, row.Time).FontSize(9).TextColor(fg)
-							})
+							}
+							if index < 9 {
+								ui.Text(c, Slot(index)).FontSize(9).TextColor(fg)
+							}
+							ui.Text(c, row.Tag).FontSize(10).TextColor(fg)
+							mark := ""
+							if row.Pinned {
+								mark += "📌 "
+							}
+							if row.Favorite {
+								mark += "★ "
+							}
+							if row.Sensitive {
+								mark += "🔒 "
+							}
+							ui.Text(c, mark+row.Summary).FontSize(12).TextColor(fg).Grow(1).Ellipsis("…")
+							if row.UseCount > 1 {
+								ui.Text(c, fmt.Sprintf("×%d", row.UseCount)).FontSize(9).TextColor(fg)
+							}
+							ui.Text(c, row.Time).FontSize(9).TextColor(fg)
 						})
+					})
 				}
 				if len(rows) == 0 {
 					title, hint := emptyState(a.Query())
@@ -289,16 +367,16 @@ func (a *App) listView(c *ui.Context, after *[]func()) {
 }
 
 // previewView 是右栏大图预览（不是图片条目时给元信息）。
-func (a *App) previewView(c *ui.Context, after *[]func()) {
+func (a *App) previewView(c *ui.Context, after *[]func(), l panelLayout) {
 	th := c.Theme()
 	row, ok := a.Selected()
-	ui.Column(c).Width(previewWidth).FillHeight().Gap(6).Children(func() {
+	ui.Column(c).Width(l.previewW).FillHeight().Gap(6).Children(func() {
 		if !ok {
 			return
 		}
 		if row.OriginPath != "" {
 			if b := bitmapFor(row.OriginPath); b != nil {
-				w, h := fitSize(row.Width, row.Height, previewWidth, 320)
+				w, h := fitSize(row.Width, row.Height, l.previewW, 320)
 				ui.Image(c, b).Size(w, h).Fit(ui.Contain).Radius(8)
 			} else {
 				ui.Text(c, "⚠️ 原图读不出来（文件可能已被清理）").FontSize(11).TextColor(th.Warning)
