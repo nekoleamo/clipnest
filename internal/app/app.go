@@ -511,7 +511,7 @@ func (a *App) Show() {
 	if w == nil {
 		return
 	}
-	logf("SHOW")
+	logf("SHOW ax=%v", paste.Trusted())
 	// 面板不激活 app，但仍要记住「刚才在哪个应用」以便粘贴后切回去。
 	paste.RememberForeground()
 
@@ -762,6 +762,35 @@ func (a *App) RequestAccessibility() {
 	}
 	logf("AXP open settings (already prompted)")
 	openAccessibilitySettings()
+}
+
+// HideAXHint 收起面板顶部的授权提示（写进 settings.json，重启也不再弹）。
+// 拖盘菜单里有「显示授权提示」可以把它弄回来。
+func (a *App) HideAXHint() {
+	next := a.Settings
+	next.HideAccessibilityHint = true
+	if err := settings.Save(next, a.Paths); err != nil {
+		logf("设置保存失败：%v", err)
+		return
+	}
+	a.mu.Lock()
+	a.Settings = next
+	a.mu.Unlock()
+	a.invalidate()
+}
+
+// ShowAXHint 重新显示授权提示。
+func (a *App) ShowAXHint() {
+	next := a.Settings
+	next.HideAccessibilityHint = false
+	if err := settings.Save(next, a.Paths); err != nil {
+		logf("设置保存失败：%v", err)
+		return
+	}
+	a.mu.Lock()
+	a.Settings = next
+	a.mu.Unlock()
+	a.invalidate()
 }
 
 // PanelView 是面板的视图函数（给 ui.View 用）。

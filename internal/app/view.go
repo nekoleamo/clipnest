@@ -61,7 +61,7 @@ func (a *App) panelView(c *ui.Context) {
 
 	root := ui.Column(c).Fill().Gap(8).Padding(8).Background(th.Background)
 	root.Children(func() {
-		if !paste.Trusted() {
+		if !paste.Trusted() && !a.Settings.HideAccessibilityHint {
 			ui.Row(c).Fill().Gap(6).Children(func() {
 				ui.Text(c, "⚠️ 没有辅助功能授权，回车只复制不粘贴").
 					FontSize(11).TextColor(th.Warning).Grow(1)
@@ -72,6 +72,9 @@ func (a *App) panelView(c *ui.Context) {
 				if grantBtn.Clicked() {
 					a.Dismiss() // 面板是 layer=3 的浮动窗，先收起来别抢镜头
 					a.RequestAccessibility()
+				}
+				if ui.Button(c, "忽略").Clicked() {
+					a.HideAXHint()
 				}
 			})
 		}

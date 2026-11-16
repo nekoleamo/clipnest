@@ -41,6 +41,9 @@ type Settings struct {
 	IgnoreSensitiveApps bool `json:"ignore_sensitive_apps"`
 	// ExportDir 是导出目录（空 = ~/Downloads）。
 	ExportDir string `json:"export_dir"`
+	// HideAccessibilityHint 关掉面板顶部那条「没有辅助功能授权」提示（用户自己知道就行）。
+	// 授权状态真变了会自动恢复正常显示（见 tray 里的菜单项）。
+	HideAccessibilityHint bool `json:"hide_accessibility_hint"`
 }
 
 // Default 是默认设置。

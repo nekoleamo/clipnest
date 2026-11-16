@@ -18,6 +18,7 @@ import (
 
 	"clipnest/internal/app"
 	"clipnest/internal/clip"
+	"clipnest/internal/paste"
 	"clipnest/internal/paths"
 	"clipnest/internal/settings"
 	"clipnest/internal/store"
@@ -113,6 +114,14 @@ func main() {
 		// 第二个实例被唤起时（用户又点了图标）把面板亮出来
 		mygo.App.OnSecondInstance(func(_ []string, _ string) { a.Show() })
 
+		// 自检钩子：`open -a clipnest.app --args -ax-prompt` 直接弹辅助功能授权提示
+		// （tccutil reset 之后重新登记用，不必拿鼠标去点面板里的按钮）
+		if hasArg("-ax-prompt") {
+			go func() {
+				log.Printf("AXP exec prompt trusted=%v", paste.PromptTrust())
+			}()
+		}
+
 		// 自检钩子：CLIPNEST_AUTOLOGIN=1 注册登录项，=0 取消（macOS 走 SMAppService）
 		switch os.Getenv("CLIPNEST_AUTOLOGIN") {
 		case "1", "true":
@@ -156,6 +165,16 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("EXIT App.Run")
+}
+
+// hasArg 判断命令行里有没有某个参数（-ax-prompt 这类自检钩子用）。
+func hasArg(want string) bool {
+	for _, a := range os.Args[1:] {
+		if a == want {
+			return true
+		}
+	}
+	return false
 }
 
 // setupLogFile 把日志同时写到 <data>/clipnest.log（超过 2 MB 就轮转一份 .1）。

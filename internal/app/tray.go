@@ -9,6 +9,8 @@ func (a *App) AttachTray(icon []byte) (*mygo.Tray, error) {
 	menu := mygo.NewMenu([]*mygo.MenuItem{
 		{Label: "显示面板  " + Hotkey(), Click: func(*mygo.MenuItem, *mygo.Window) { a.TogglePanel() }},
 		{Type: mygo.MenuItemSeparator},
+		{Label: "辅助功能授权…", Click: func(*mygo.MenuItem, *mygo.Window) { a.RequestAccessibility() }},
+		{Label: "显示授权提示", Click: func(*mygo.MenuItem, *mygo.Window) { a.ShowAXHint() }},
 		{Label: "偏好设置…", Click: func(*mygo.MenuItem, *mygo.Window) { a.OpenPrefs() }},
 		{Label: "立即同步", Click: func(*mygo.MenuItem, *mygo.Window) { a.StartSync() }},
 		{Type: mygo.MenuItemSeparator},
