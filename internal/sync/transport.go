@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path"
@@ -90,12 +91,18 @@ type WebDavTransport struct {
 // NewWebDavTransport 建一个 WebDAV 传输。
 //
 // 必须显式禁代理：本机 HTTPS_PROXY 会把局域网 NAS 也送进代理，每个请求卡到超时。
+// 连接超时单独设短（3 秒）：出门在外局域网地址不可达时，快速失败才能尽快切到
+// Tailscale 备用地址（整体请求仍留 30 秒，慢的 PROPFIND 不受影响）。
 func NewWebDavTransport(url, remoteDir, user, password string, insecureTLS bool) *WebDavTransport {
+	dialer := &net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}
 	transport := &http.Transport{
-		Proxy:               nil,
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: insecureTLS},
-		MaxIdleConnsPerHost: 4,
-		IdleConnTimeout:     30 * time.Second,
+		Proxy:                 nil,
+		DialContext:           dialer.DialContext,
+		TLSClientConfig:       &tls.Config{InsecureSkipVerify: insecureTLS},
+		TLSHandshakeTimeout:   6 * time.Second,
+		MaxIdleConnsPerHost:   4,
+		IdleConnTimeout:       30 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Second,
 	}
 	return &WebDavTransport{
 		base:     strings.TrimRight(url, "/") + "/" + strings.Trim(remoteDir, "/"),
