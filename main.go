@@ -88,6 +88,13 @@ func main() {
 			Hidden:    true,
 			Content:   ui.View(a.PrefsView),
 		})
+		prefs.OnClose(func(e *mygo.CloseEvent) {
+			if a.Quitting() {
+				return // 退出流程里要真的关掉
+			}
+			e.PreventDefault()
+			prefs.Hide() // 关掉设置窗只是隐藏，下次还能打开
+		})
 		a.SetPrefsWindow(prefs)
 
 		// 大图预览窗口：点右栏图片时显示（窗口只在启动阶段建，帧回调里建不安全）
@@ -101,6 +108,9 @@ func main() {
 			Content:   ui.View(a.ImageView),
 		})
 		preview.OnClose(func(e *mygo.CloseEvent) {
+			if a.Quitting() {
+				return // 退出流程里要真的关掉，否则 Quit 会被取消
+			}
 			e.PreventDefault()
 			preview.Hide()
 		})

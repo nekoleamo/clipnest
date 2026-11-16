@@ -173,6 +173,24 @@ func (a *App) invalidate() {
 // 否则 mygo 的 prepareQuit 会因为「窗口关不掉」取消整个退出。
 var quitting atomic.Bool
 
+// Quit 退出应用：先置「正在退出」并收起所有窗口。
+//
+// 窗口的 OnClose 默认会 PreventDefault 拦下关闭（否则关窗就销毁了），
+// 这一步不先做，mygo 的 prepareQuit 会因为「窗口关不掉」把整个退出取消，
+// 表现就是：点退出后界面没了、托盘还在、点什么都没反应。
+func (a *App) Quit() {
+	a.MarkQuitting()
+	a.mu.Lock()
+	wins := []*mygo.Window{a.panel, a.prefs, a.imageWin}
+	a.mu.Unlock()
+	for _, w := range wins {
+		if w != nil {
+			w.Hide()
+		}
+	}
+	mygo.App.Quit()
+}
+
 // MarkQuitting 在 OnBeforeQuit 里调用。
 func (a *App) MarkQuitting() { quitting.Store(true) }
 

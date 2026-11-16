@@ -32,7 +32,7 @@ func (a *App) buildMenu() *mygo.Menu {
 		{Label: "偏好设置…", Click: func(*mygo.MenuItem, *mygo.Window) { a.OpenPrefs() }},
 		{Label: "立即同步", Click: func(*mygo.MenuItem, *mygo.Window) { a.StartSync() }},
 		{Type: mygo.MenuItemSeparator},
-		{Label: "退出 clipnest", Click: func(*mygo.MenuItem, *mygo.Window) { mygo.App.Quit() }},
+		{Label: "退出 clipnest", Click: func(*mygo.MenuItem, *mygo.Window) { a.Quit() }},
 	})
 }
 
