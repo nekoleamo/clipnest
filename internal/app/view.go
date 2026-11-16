@@ -54,6 +54,9 @@ func bitmapFor(path string) *ui.Bitmap {
 // panelView 是面板的视图函数。
 func (a *App) panelView(c *ui.Context) {
 	th := c.Theme()
+	// 面板是自绘的浮动窗：菜单也用窗口内画的那种，跟整体观感一致，
+	// 而且不依赖 app 是否在前台（系统菜单在非激活的 accessory app 里弹不出来）
+	c.SetMenuPresentation(ui.PopoverMenus)
 	var after []func()
 	applyAfter := func() {
 		for _, fn := range after {
@@ -382,7 +385,8 @@ func (a *App) listView(c *ui.Context, after *[]func()) {
 							if row.Sensitive {
 								mark += "🔒 "
 							}
-							a.summaryText(c, mark+row.Summary, q, fg, th).FontSize(12).TextColor(fg).Grow(1).Ellipsis("…")
+							a.summaryText(c, mark+row.Summary, q, fg, th).FontSize(12).TextColor(fg).Grow(1).Ellipsis("…").
+								ContextMenu(func(m *ui.Menu) { a.rowMenu(m, row) })
 							if row.UseCount > 1 {
 								ui.Text(c, fmt.Sprintf("×%d", row.UseCount)).FontSize(9).TextColor(fg)
 							}
@@ -419,6 +423,9 @@ func (a *App) previewView(c *ui.Context, after *[]func(), l panelLayout) {
 
 	card := ui.Column(c).Width(l.previewW).FillHeight().Gap(8).
 		Padding(12).Radius(10).Background(th.Surface).Justify(ui.Start)
+	if h := card.Bounds().H; h > 0 {
+		a.previewH = h
+	}
 	card.Children(func() {
 		if !ok {
 			ui.Column(c).Fill().Justify(ui.Center).AlignItems(ui.Center).Gap(4).Children(func() {
@@ -442,7 +449,8 @@ func (a *App) previewView(c *ui.Context, after *[]func(), l panelLayout) {
 		case row.Kind == model.KindText || row.Kind == model.KindHtml || row.Kind == model.KindRtf:
 			// 只看个大概：截断显示，不做内嵌滚动（长文本来回滚也没人看）
 			if content := excerpt(row.Content, 220); content != "" {
-				a.summaryText(c, content, a.Query(), th.Text, th).FontSize(12).Wrap()
+				a.summaryText(c, content, a.Query(), th.Text, th).FontSize(12).Wrap().
+					MaxHeight(previewContentBudget(a.previewH))
 			}
 		case row.Kind == model.KindFiles:
 			ui.Text(c, excerpt(row.Content, 300)).FontSize(11).TextColor(th.TextMuted).Wrap()
@@ -454,9 +462,12 @@ func (a *App) previewView(c *ui.Context, after *[]func(), l panelLayout) {
 		// 备注吃掉剩下的高度，卡片自然填满
 		ui.Row(c).Height(16).Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "备注").FontSize(11).TextColor(th.TextMuted).Width(40)
-			if n := len([]rune(row.Note)); n > 0 {
-				ui.Text(c, fmt.Sprintf("%d 字", n)).FontSize(10).TextColor(th.TextMuted)
+			n := len([]rune(row.Note))
+			counter := fmt.Sprintf("%d / %d", n, noteMaxRunes)
+			if n > noteMaxRunes {
+				counter = fmt.Sprintf("%d / %d（超出部分不会保存）", n, noteMaxRunes)
 			}
+			ui.Text(c, counter).FontSize(10).TextColor(th.TextMuted)
 		})
 		note := a.NoteValue(row.ID, row.Note)
 		if ui.TextArea(c, note).Grow(1).MinHeight(72).FontSize(11).
@@ -466,12 +477,12 @@ func (a *App) previewView(c *ui.Context, after *[]func(), l panelLayout) {
 		}
 
 		// 动作：和键盘快捷键对应，省得去记
-		ui.Row(c).Height(28).Gap(6).Children(func() {
-			if ui.Button(c, "复制").FontSize(11).Clicked() {
+		ui.Row(c).Height(30).Gap(6).Children(func() {
+			iconAction(c, th, IconCopy, "复制", func() {
 				r := row
 				*after = append(*after, func() { a.Copy(r) })
-			}
-			if ui.Button(c, "导出").FontSize(11).Clicked() {
+			})
+			iconAction(c, th, IconExport, "导出", func() {
 				r := row
 				*after = append(*after, func() {
 					if file, err := a.Export(r); err != nil {
@@ -480,7 +491,8 @@ func (a *App) previewView(c *ui.Context, after *[]func(), l panelLayout) {
 						a.SetStatus("已导出 " + baseName(file) + "（⌘V 可粘文件）")
 					}
 				})
-			}
+			})
+			ui.Box(c).Grow(1)
 			ui.Text(c, "⌘Y / ⌘O").FontSize(10).TextColor(th.TextMuted)
 		})
 	})
@@ -514,7 +526,32 @@ func (a *App) previewHeader(c *ui.Context, row Row, th *ui.Theme) ui.Element {
 	return head
 }
 
-// previewImage 居中显示原图，下面标尺寸。
+// previewChromeH 是卡片里除内容区与备注以外的固定高度：
+// 内边距 24 + 头部 20 + 分隔线 1 + 分组 28 + 备注标签 16 + 动作 30 + 6 个间距 48。
+const previewChromeH = 167
+
+// previewNoteReserve 是留给备注的最小高度。
+const previewNoteReserve = 84
+
+// noteMaxRunes 是备注的字数上限（超出的部分不保存）。
+const noteMaxRunes = 500
+
+// previewContentBudget 是内容区能用多高：卡片实际高度减去固定块，再给备注留位置。
+func previewContentBudget(cardH float32) float32 {
+	if cardH <= 0 {
+		cardH = 432 // 首帧还没量到，用默认面板高度估
+	}
+	budget := cardH - previewChromeH - previewNoteReserve
+	if budget < 80 {
+		budget = 80
+	}
+	if budget > 320 {
+		budget = 320
+	}
+	return budget
+}
+
+// previewImage 在固定高度的框里居中显示原图，尺寸字也在框内——高图不会压到下面的控件。
 func (a *App) previewImage(c *ui.Context, row Row, l panelLayout, th *ui.Theme) {
 	if row.OriginPath == "" {
 		ui.Text(c, "⚠️ 原图文件缺失").FontSize(11).TextColor(th.Warning)
@@ -525,12 +562,18 @@ func (a *App) previewImage(c *ui.Context, row Row, l panelLayout, th *ui.Theme) 
 		ui.Text(c, "⚠️ 原图读不出来（文件可能已被清理）").FontSize(11).TextColor(th.Warning)
 		return
 	}
+	box := previewContentBudget(a.previewH)
 	maxW := l.previewW - 24
-	w, h := fitSize(row.Width, row.Height, maxW, 300)
-	ui.Column(c).Grow(1).Justify(ui.Center).AlignItems(ui.Center).Gap(6).Children(func() {
+	// 小图按栏宽放大（最多 2.4 倍），大图等比缩到框内
+	w, h := fitSizeUp(row.Width, row.Height, maxW, box-18, 2.4)
+	ui.Column(c).Height(box).Justify(ui.Center).AlignItems(ui.Center).Gap(6).Children(func() {
 		ui.Image(c, b).Size(w, h).Fit(ui.Contain).Radius(8)
 		if row.Width > 0 && row.Height > 0 {
-			ui.Text(c, fmt.Sprintf("%d × %d", row.Width, row.Height)).
+			pct := 100
+			if row.Width > 0 {
+				pct = int(100 * w / float32(row.Width))
+			}
+			ui.Text(c, fmt.Sprintf("%d × %d · 显示 %d%%", row.Width, row.Height, pct)).
 				FontSize(10).TextColor(th.TextMuted)
 		}
 	})
@@ -642,6 +685,11 @@ func emptyState(q string) (title, hint string) {
 
 // fitSize 按比例把图片塞进 maxW × maxH（等比，不裁切）。
 func fitSize(w, h int64, maxW, maxH float32) (float32, float32) {
+	return fitSizeUp(w, h, maxW, maxH, 1)
+}
+
+// fitSizeUp 同 fitSize，但允许放大到 maxUpscale 倍（小图按栏宽放大，不显得小）。
+func fitSizeUp(w, h int64, maxW, maxH, maxUpscale float32) (float32, float32) {
 	if w <= 0 || h <= 0 {
 		return maxW, maxH
 	}
@@ -649,8 +697,8 @@ func fitSize(w, h int64, maxW, maxH float32) (float32, float32) {
 	if s := maxH / float32(h); s < scale {
 		scale = s
 	}
-	if scale > 1 {
-		scale = 1 // 小图不放大，避免糊
+	if scale > maxUpscale {
+		scale = maxUpscale
 	}
 	return float32(w) * scale, float32(h) * scale
 }

@@ -86,6 +86,8 @@ type App struct {
 	ListScroll ui.ScrollState
 	// listViewH 是列表可视区高度（每帧量），供滚动计算用
 	listViewH float32
+	// previewH 是右栏卡片的高度（每帧量），供图片/正文的高度预算用
+	previewH float32
 	// 设置窗里的跨帧草稿与状态
 	shortcutDraft string
 	shortcutMsg   string
@@ -566,6 +568,10 @@ func (a *App) NoteValue(id int64, note string) *string {
 
 // SaveNote 写备注（契约 6：不刷新 updated_at）。
 func (a *App) SaveNote(id int64, text string) {
+	// 超过上限的部分直接截掉（设置窗里有字数提示）
+	if runes := []rune(text); len(runes) > noteMaxRunes {
+		text = string(runes[:noteMaxRunes])
+	}
 	if err := db.UpdateMeta(a.Store.DB, id, db.MetaPatch{Note: &text}); err != nil {
 		logf("NOTE save failed id=%d: %v", id, err)
 		a.SetStatus("❌ 备注保存失败：" + err.Error())
