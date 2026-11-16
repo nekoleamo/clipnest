@@ -80,6 +80,12 @@ type App struct {
 	axPrompted atomic.Bool
 	// dragProbe 只在测试里用：拖拽开始时把载荷交出去断言
 	dragProbe func(transfer.Data)
+	// scrollToSel 是一次性的「把选中行滚进可视区」请求（键盘移动时置位）
+	scrollToSel bool
+	// ListScroll 是列表的滚动位置（视图里 TrackScroll 绑定它）
+	ListScroll ui.ScrollState
+	// listViewH 是列表可视区高度（每帧量），供滚动计算用
+	listViewH float32
 	// 设置窗里的跨帧草稿与状态
 	shortcutDraft string
 	shortcutMsg   string
@@ -371,6 +377,39 @@ func (a *App) Selected() (Row, bool) {
 	return a.rows[a.sel], true
 }
 
+// scrollSelectionIntoView 按行位置调整列表滚动，让选中行完整露出来。
+//
+// 行高不固定（图片行带缩略图更高），所以用渲染时累加出来的 top/h。
+func (a *App) scrollSelectionIntoView(top, height float32) {
+	view := a.listViewH
+	if view <= 0 {
+		return
+	}
+	y := a.ListScroll.Y
+	switch {
+	case top < y:
+		a.ListScroll.Y = top
+	case top+height > y+view:
+		a.ListScroll.Y = top + height - view
+	}
+}
+
+// requestScrollToSelection 让下一次渲染把选中行滚进可视区（一次性）。
+func (a *App) requestScrollToSelection() {
+	a.mu.Lock()
+	a.scrollToSel = true
+	a.mu.Unlock()
+}
+
+// takeScrollToSelection 取走一次性请求（渲染时只需要滚一次）。
+func (a *App) takeScrollToSelection() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	want := a.scrollToSel
+	a.scrollToSel = false
+	return want
+}
+
 // Move 上下移动选中（delta 为 ±1）。
 func (a *App) Move(delta int) {
 	a.mu.Lock()
@@ -383,6 +422,7 @@ func (a *App) Move(delta int) {
 	}
 	a.sel = next
 	a.mu.Unlock()
+	a.requestScrollToSelection()
 	a.invalidate()
 }
 
@@ -393,6 +433,7 @@ func (a *App) Select(index int) {
 		a.sel = index
 	}
 	a.mu.Unlock()
+	a.requestScrollToSelection()
 	a.invalidate()
 }
 
@@ -405,6 +446,7 @@ func (a *App) SelectSlot(n int) bool {
 	}
 	a.mu.Unlock()
 	if ok {
+		a.requestScrollToSelection()
 		a.invalidate()
 	}
 	return ok
@@ -799,6 +841,7 @@ func (a *App) Show() {
 	a.visible = true
 	a.status = ""
 	a.syncMsg = ""
+	a.scrollToSel = true
 	a.mu.Unlock()
 	a.Refresh()
 

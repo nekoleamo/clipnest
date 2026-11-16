@@ -297,8 +297,14 @@ func (a *App) listView(c *ui.Context, after *[]func()) {
 	rows := a.Rows()
 	sel, _ := a.Selection()
 
+	var accY float32
+	var selTop, selH float32
 	ui.Column(c).Fill().Children(func() {
-		ui.Scroll(c).Fill().Children(func() {
+		scroll := ui.Scroll(c).Fill().TrackScroll(&a.ListScroll)
+		if b := scroll.Bounds(); b.H > 0 {
+			a.listViewH = b.H
+		}
+		scroll.Children(func() {
 			ui.Column(c).Fill().Gap(2).Children(func() {
 				for i := range rows {
 					index := i
@@ -322,6 +328,15 @@ func (a *App) listView(c *ui.Context, after *[]func()) {
 						}).
 						// 按住往窗口外拖 = 拖拽导出（文本给纯文本，图片/文件给文件）
 						DragDataFrom(func() transfer.Data { return a.DragData(rowID) })
+					rowH := rowEl.Bounds().H
+					if rowH <= 0 {
+						rowH = 28 // 首帧还没有高度，用估的
+					}
+					if index == sel {
+						selTop = accY
+						selH = rowH
+					}
+					accY += rowH + 2
 					if index == 0 && os.Getenv("CLIPNEST_DEBUG_RECTS") != "" {
 						if b := rowEl.Bounds(); b.W > 0 {
 							logf("RECT row0 x=%.0f y=%.0f w=%.0f h=%.0f", b.X, b.Y, b.W, b.H)
@@ -355,6 +370,9 @@ func (a *App) listView(c *ui.Context, after *[]func()) {
 							ui.Text(c, row.Time).FontSize(9).TextColor(fg)
 						})
 					})
+				}
+				if len(rows) > 0 && a.takeScrollToSelection() {
+					a.scrollSelectionIntoView(selTop, selH)
 				}
 				if len(rows) == 0 {
 					title, hint := emptyState(a.Query())

@@ -2,6 +2,7 @@ package app
 
 import (
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -120,4 +121,46 @@ func TestSearchFiltersAndHighlights(t *testing.T) {
 	if got := len(a.Rows()); got != 3 {
 		t.Fatalf("清空查询应当回到 3 条，实际 %d", got)
 	}
+}
+
+// TestKeyboardMoveScrollsSelectionIntoView 键盘移动选中时列表要跟着滚。
+func TestKeyboardMoveScrollsSelectionIntoView(t *testing.T) {
+	a := newTestApp(t)
+	for i := 0; i < 60; i++ {
+		res, err := db.Upsert(a.Store.DB, model.NewText("条目编号 "+itoaPad(i)))
+		if err != nil {
+			t.Fatalf("入库失败：%v", err)
+		}
+		_ = res
+	}
+	a.Refresh()
+
+	tester := ui.NewTester(a.PanelView, 720, 560)
+	tester.Frame()
+
+	// 用键盘往下走 25 行：选中的行必须还在面板可见区域内
+	for i := 0; i < 25; i++ {
+		tester.KeyDown(ui.KeyDown)
+		tester.Frame()
+	}
+	tester.Frame() // 滚动在布局后生效，给一帧
+	sel, total := a.Selection()
+	if total != 60 || sel != 25 {
+		t.Fatalf("选中位置不对：sel=%d total=%d", sel, total)
+	}
+	if a.ListScroll.Y <= 0 {
+		t.Fatalf("列表没滚动：Y=%.1f（视口高 %.0f）", a.ListScroll.Y, a.listViewH)
+	}
+	// 选中行的底部不能超出一屏（按行高与滚动量核对）
+	rowH := float32(28)
+	top := float32(sel)*rowH - a.ListScroll.Y
+	if top < 0 || top+rowH > a.listViewH+1 {
+		t.Fatalf("选中行没完全露出来：top=%.1f 视口=%.1f 滚动=%.1f", top, a.listViewH, a.ListScroll.Y)
+	}
+}
+
+// itoaPad 是三位补零的编号，保证每行摘要不重复。
+func itoaPad(n int) string {
+	s := "000" + strconv.Itoa(n)
+	return s[len(s)-3:]
 }
