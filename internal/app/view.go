@@ -79,11 +79,12 @@ func (a *App) panelView(c *ui.Context) {
 			})
 		}
 		a.searchField(c, &after)
+		a.filterBar(c, &after)
 		a.bindKeys(c, &after)
 
 		ui.Row(c).Fill().Gap(8).Children(func() {
 			a.listView(c, &after)
-			a.previewView(c)
+			a.previewView(c, &after)
 		})
 
 		sel, total := a.Selection()
@@ -124,6 +125,52 @@ func (a *App) searchField(c *ui.Context, after *[]func()) {
 			}
 		})
 	}
+}
+
+// filterBar 是搜索框下面那排筛选：类型分段 + 分组下拉。
+func (a *App) filterBar(c *ui.Context, after *[]func()) {
+	th := c.Theme()
+	kind, groupNow := a.FilterState()
+
+	kindNow := kind
+	ui.Row(c).Fill().Gap(8).AlignItems(ui.Center).Children(func() {
+		if ui.Segmented(c, &kindNow, "全部", "收藏", "置顶", "图片", "文件").Changed() {
+			k := kindNow
+			*after = append(*after, func() { a.SetKindFilter(k) })
+		}
+		groups := a.Groups()
+		if len(groups) > 0 {
+			names := make([]string, 0, len(groups)+2)
+			names = append(names, "全部分组", "未分组")
+			for _, g := range groups {
+				names = append(names, g.Name)
+			}
+			current := "全部分组"
+			switch groupNow {
+			case "":
+			case groupNone:
+				current = "未分组"
+			default:
+				current = groupNow
+			}
+			choice := current
+			ui.Select(c, &choice, names).Width(140)
+			if choice != current {
+				pick := choice
+				*after = append(*after, func() {
+					switch pick {
+					case "全部分组":
+						a.SetGroupFilter("")
+					case "未分组":
+						a.SetGroupFilter(groupNone)
+					default:
+						a.SetGroupFilter(pick)
+					}
+				})
+			}
+		}
+		ui.Text(c, fmt.Sprintf("共 %d 条", len(a.Rows()))).FontSize(10).TextColor(th.TextMuted).Grow(1)
+	})
 }
 
 // bindKeys 绑定面板的键盘动作（焦点在搜索框里也要能生效）。
@@ -215,10 +262,16 @@ func (a *App) listView(c *ui.Context, after *[]func()) {
 								if row.Pinned {
 									mark += "📌 "
 								}
+								if row.Favorite {
+									mark += "★ "
+								}
 								if row.Sensitive {
 									mark += "🔒 "
 								}
 								ui.Text(c, mark+row.Summary).FontSize(12).TextColor(fg).Grow(1).Ellipsis("…")
+								if row.UseCount > 1 {
+									ui.Text(c, fmt.Sprintf("×%d", row.UseCount)).FontSize(9).TextColor(fg)
+								}
 								ui.Text(c, row.Time).FontSize(9).TextColor(fg)
 							})
 						})
@@ -236,7 +289,7 @@ func (a *App) listView(c *ui.Context, after *[]func()) {
 }
 
 // previewView 是右栏大图预览（不是图片条目时给元信息）。
-func (a *App) previewView(c *ui.Context) {
+func (a *App) previewView(c *ui.Context, after *[]func()) {
 	th := c.Theme()
 	row, ok := a.Selected()
 	ui.Column(c).Width(previewWidth).FillHeight().Gap(6).Children(func() {
@@ -253,12 +306,52 @@ func (a *App) previewView(c *ui.Context) {
 		} else if row.Kind == model.KindImage {
 			ui.Text(c, "⚠️ 原图文件缺失").FontSize(11).TextColor(th.Warning)
 		}
-		ui.Text(c, fmt.Sprintf("%s · %s", row.Tag, row.Time)).FontSize(11).TextColor(th.TextMuted)
+		meta := fmt.Sprintf("%s · %s", row.Tag, row.Time)
+		if row.UseCount > 1 {
+			meta += fmt.Sprintf(" · 用过 %d 次", row.UseCount)
+		}
+		ui.Text(c, meta).FontSize(11).TextColor(th.TextMuted)
 		if row.Width > 0 && row.Height > 0 {
 			ui.Text(c, fmt.Sprintf("%d×%d", row.Width, row.Height)).FontSize(11).TextColor(th.TextMuted)
 		}
-		if row.Note != "" {
-			ui.Text(c, row.Note).FontSize(11).TextColor(th.Text)
+
+		// 分组：直接给这条选一个组（组在设置窗里建）
+		groups := a.Groups()
+		names := make([]string, 0, len(groups)+1)
+		names = append(names, "未分组")
+		for _, g := range groups {
+			names = append(names, g.Name)
+		}
+		current := "未分组"
+		if row.GroupName != "" {
+			current = row.GroupName
+		}
+		choice := current
+		ui.Row(c).Fill().Gap(6).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "分组").FontSize(10).TextColor(th.TextMuted)
+			ui.Select(c, &choice, names).Width(150)
+		})
+		if choice != current {
+			pick := choice
+			*after = append(*after, func() {
+				var gid *int64
+				for _, g := range groups {
+					if g.Name == pick {
+						id := g.ID
+						gid = &id
+						break
+					}
+				}
+				a.MoveToGroup(row.ID, gid)
+			})
+		}
+
+		// 备注：改完立刻落库（契约 6：不刷新 updated_at）
+		ui.Text(c, "备注").FontSize(10).TextColor(th.TextMuted)
+		note := a.NoteValue(row.ID, row.Note)
+		if ui.TextArea(c, note).Height(64).FontSize(11).Changed() {
+			text := *note
+			*after = append(*after, func() { a.SaveNote(row.ID, text) })
 		}
 	})
 }

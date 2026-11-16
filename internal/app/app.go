@@ -40,7 +40,10 @@ type Row struct {
 	Pinned     bool
 	Favorite   bool
 	Sensitive  bool
+	UseCount   int64
 	Note       string
+	GroupID    *int64
+	GroupName  string
 }
 
 // App 是进程内的应用状态。
@@ -72,6 +75,18 @@ type App struct {
 	debounce   *time.Timer
 	// axPrompted 记录辅助功能提示是否已弹过
 	axPrompted atomic.Bool
+	// kindFilter 是顶部筛选：0 全部 / 1 收藏 / 2 置顶 / 3 图片 / 4 文件
+	kindFilter int
+	// groupFilter 是分组筛选："" 全部、"\x00" 未分组、其它为分组名
+	groupFilter string
+	// groups 是分组缓存（每次 Refresh 一起刷新）
+	groups []db.Group
+	// noteDraft/noteFor 是备注编辑器的草稿与它属于哪一条
+	noteDraft string
+	noteFor   int64
+	// 设置窗里分组管理的草稿（跨帧保留，否则一个字就丢）
+	newGroupDraft string
+	renameDrafts  map[int64]*string
 	// lastSync/lastSyncVia 是最近一次成功的同步时间与入口
 	lastSync    string
 	lastSyncVia string
@@ -157,26 +172,107 @@ func (a *App) SetPanel(w *mygo.Window) {
 func (a *App) Refresh() {
 	a.mu.Lock()
 	q := a.query
+	filter := a.currentFilterLocked()
 	a.mu.Unlock()
 
-	items, err := db.Query(a.Store.DB, q, db.Filter{}, db.Page{Limit: PageSize})
+	items, err := db.Query(a.Store.DB, q, filter, db.Page{Limit: PageSize})
 	if err != nil {
 		logf("QUERY ERROR %v", err)
 		a.SetStatus("❌ 读库失败：" + err.Error())
 		return
 	}
+	groups, err := db.ListGroups(a.Store.DB)
+	if err != nil {
+		logf("GROUP LIST ERROR %v", err)
+	}
+	byID := make(map[int64]string, len(groups))
+	for _, g := range groups {
+		byID[g.ID] = g.Name
+	}
+
 	rows := make([]Row, 0, len(items))
 	for _, item := range items {
-		rows = append(rows, a.rowOf(item))
+		row := a.rowOf(item)
+		if item.GroupID != nil {
+			row.GroupName = byID[*item.GroupID]
+		}
+		rows = append(rows, row)
 	}
 
 	a.mu.Lock()
 	a.rows = rows
+	a.groups = groups
 	if a.sel >= len(rows) {
 		a.sel = max(0, len(rows)-1)
 	}
 	a.mu.Unlock()
 	a.invalidate()
+}
+
+// 分组筛选里代表「未分组」的哨兵值（分组名不可能含 \x00）。
+const groupNone = "\x00"
+
+// currentFilterLocked 把 UI 上的筛选状态翻成 db.Filter（调用方持锁）。
+func (a *App) currentFilterLocked() db.Filter {
+	var f db.Filter
+	switch a.kindFilter {
+	case 1:
+		yes := true
+		f.Favorite = &yes
+	case 2:
+		yes := true
+		f.Pinned = &yes
+	case 3:
+		f.Kinds = []model.ItemKind{model.KindImage}
+	case 4:
+		f.Kinds = []model.ItemKind{model.KindFiles}
+	}
+	switch {
+	case a.groupFilter == "":
+	case a.groupFilter == groupNone:
+		f.NoGroup = true
+	default:
+		for _, g := range a.groups {
+			if g.Name == a.groupFilter {
+				id := g.ID
+				f.GroupID = &id
+				break
+			}
+		}
+	}
+	return f
+}
+
+// SetKindFilter 切换顶部筛选并重查。
+func (a *App) SetKindFilter(kind int) {
+	a.mu.Lock()
+	a.kindFilter = kind
+	a.sel = 0
+	a.mu.Unlock()
+	a.Refresh()
+}
+
+// SetGroupFilter 切换分组筛选（"" 全部、groupNone 未分组、其它为组名）。
+func (a *App) SetGroupFilter(name string) {
+	a.mu.Lock()
+	a.groupFilter = name
+	a.sel = 0
+	a.mu.Unlock()
+	a.Refresh()
+}
+
+// FilterState 返回当前的筛选状态（给视图用）。
+func (a *App) FilterState() (kind int, group string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.kindFilter, a.groupFilter
+}
+
+// Groups 返回分组缓存。
+func (a *App) Groups() []db.Group {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]db.Group(nil), a.groups...)
 }
 
 // SetQuery 改搜索词并重查。
@@ -200,7 +296,9 @@ func (a *App) rowOf(item model.Item) Row {
 		Pinned:    item.Pinned,
 		Favorite:  item.Favorite,
 		Sensitive: item.Sensitive,
+		UseCount:  item.UseCount,
 		Note:      item.Note,
+		GroupID:   item.GroupID,
 	}
 	if item.Kind == model.KindImage {
 		hash := strings.TrimSuffix(item.Content, ".png")
@@ -400,6 +498,106 @@ func (a *App) Remove(row Row) bool {
 	a.Refresh()
 	a.SetStatus("已删除")
 	return true
+}
+
+// NoteValue 返回备注编辑器的绑定值：选中条目变了就把草稿重置成库里那条的备注。
+func (a *App) NoteValue(id int64, note string) *string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.noteFor != id {
+		a.noteFor = id
+		a.noteDraft = note
+	}
+	return &a.noteDraft
+}
+
+// SaveNote 写备注（契约 6：不刷新 updated_at）。
+func (a *App) SaveNote(id int64, text string) {
+	if err := db.UpdateMeta(a.Store.DB, id, db.MetaPatch{Note: &text}); err != nil {
+		logf("NOTE save failed id=%d: %v", id, err)
+		a.SetStatus("❌ 备注保存失败：" + err.Error())
+		return
+	}
+	a.mu.Lock()
+	for i := range a.rows {
+		if a.rows[i].ID == id {
+			a.rows[i].Note = text
+			break
+		}
+	}
+	a.mu.Unlock()
+	a.invalidate()
+}
+
+// MoveToGroup 把条目放进分组（gid 为 nil 表示移出分组）。
+func (a *App) MoveToGroup(id int64, gid *int64) bool {
+	patch := db.MetaPatch{GroupID: gid}
+	if gid == nil {
+		patch = db.MetaPatch{ClearGroup: true}
+	}
+	if err := db.UpdateMeta(a.Store.DB, id, patch); err != nil {
+		logf("GROUP move failed id=%d: %v", id, err)
+		a.SetStatus("❌ 分组保存失败：" + err.Error())
+		return false
+	}
+	a.Refresh()
+	return true
+}
+
+// NewGroupDraft 是设置窗「新分组名字」输入框的绑定值。
+func (a *App) NewGroupDraft() *string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return &a.newGroupDraft
+}
+
+// RenameDraft 是某个分组改名输入框的绑定值（换组时重置成库里的名字）。
+func (a *App) RenameDraft(id int64, current string) *string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.renameDrafts == nil {
+		a.renameDrafts = map[int64]*string{}
+	}
+	if draft, ok := a.renameDrafts[id]; ok && *draft == "" {
+		// 名字被清空过：重新拉回库里的值，避免输入框空着
+		*draft = current
+	}
+	if _, ok := a.renameDrafts[id]; !ok {
+		draft := current
+		a.renameDrafts[id] = &draft
+	}
+	return a.renameDrafts[id]
+}
+
+// CreateGroup 新建分组并把 id 返回给调用方（设置窗刷新用）。
+func (a *App) CreateGroup(name string) (int64, error) {
+	id, err := db.EnsureGroup(a.Store.DB, name)
+	if err != nil {
+		a.SetStatus("❌ " + err.Error())
+		return 0, err
+	}
+	a.Refresh()
+	return id, nil
+}
+
+// RenameGroup 改分组名。
+func (a *App) RenameGroup(id int64, name string) error {
+	if err := db.RenameGroup(a.Store.DB, id, name); err != nil {
+		a.SetStatus("❌ " + err.Error())
+		return err
+	}
+	a.Refresh()
+	return nil
+}
+
+// DeleteGroup 删分组（组内条目回落到未分组）。
+func (a *App) DeleteGroup(id int64) error {
+	if err := db.DeleteGroup(a.Store.DB, id); err != nil {
+		a.SetStatus("❌ " + err.Error())
+		return err
+	}
+	a.Refresh()
+	return nil
 }
 
 // Flag 是可以单独切换的标记。

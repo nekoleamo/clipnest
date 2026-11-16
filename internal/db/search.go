@@ -19,6 +19,7 @@ const FTSMinChars = 3
 type Filter struct {
 	Kinds     []model.ItemKind
 	GroupID   *int64
+	NoGroup   bool // true = 只要未分组的
 	Favorite  *bool
 	Pinned    *bool
 	Sensitive *bool // nil = 不过滤；false = 排除敏感条目
@@ -93,6 +94,9 @@ func whereClause(q string, filter Filter) (string, []any) {
 	if filter.GroupID != nil {
 		parts = append(parts, "group_id = ?")
 		values = append(values, *filter.GroupID)
+	}
+	if filter.NoGroup {
+		parts = append(parts, "group_id IS NULL")
 	}
 	if filter.Favorite != nil {
 		parts = append(parts, "favorite = ?")

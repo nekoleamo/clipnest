@@ -7,6 +7,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"clipnest/internal/backup"
+	"clipnest/internal/db"
 	"clipnest/internal/settings"
 	clipsync "clipnest/internal/sync"
 )
@@ -151,6 +152,36 @@ func (a *App) prefsView(c *ui.Context) {
 				ui.Checkbox(c, &realtime, "实时同步（复制后立即推，并按下面间隔拉取）")
 				label(c, "实时拉取间隔（秒，2–300）", th)
 				ui.NumberInput(c, &pullSecs, 2, 300, 1)
+
+				ui.Divider(c)
+				ui.Text(c, "分组").FontSize(14).Bold().TextColor(th.Text)
+				label(c, "面板右栏给单条条目选组；同步按名字对齐", th)
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+					ui.TextInput(c, a.NewGroupDraft()).Placeholder("新分组名字").Width(200)
+					if ui.Button(c, "新建").Clicked() {
+						if _, err := a.CreateGroup(*a.NewGroupDraft()); err == nil {
+							*a.NewGroupDraft() = ""
+						}
+					}
+				})
+				groups := a.Groups()
+				if len(groups) == 0 {
+					ui.Text(c, "还没有分组").FontSize(11).TextColor(th.TextMuted)
+				}
+				counts, _ := db.GroupCounts(a.Store.DB)
+				for _, g := range groups {
+					gid := g.ID
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+						ui.TextInput(c, a.RenameDraft(gid, g.Name)).Width(200)
+						ui.Text(c, fmt.Sprintf("%d 条", counts[gid])).FontSize(10).TextColor(th.TextMuted)
+						if ui.Button(c, "改名").Clicked() {
+							_ = a.RenameGroup(gid, *a.RenameDraft(gid, g.Name))
+						}
+						if ui.Button(c, "删除").Clicked() {
+							_ = a.DeleteGroup(gid)
+						}
+					})
+				}
 
 				ui.Divider(c)
 				ui.Text(c, "备份").FontSize(14).Bold().TextColor(th.Text)
