@@ -43,6 +43,8 @@ func (a *App) prefsView(c *ui.Context) {
 	insecure := cfg.Backend.InsecureTLS
 	encrypt := cfg.Encryption.Enabled
 	realtime := cfg.Realtime
+	shortcutDraft := *a.ShortcutDraft()
+	pruneDays := *a.PruneDaysDraft()
 	pullSecs := float64(cfg.PullIntervalSecs())
 	passphrase := ""
 
@@ -114,8 +116,41 @@ func (a *App) prefsView(c *ui.Context) {
 				label(c, "面板位置", th)
 				ui.Segmented(c, &position, "屏幕居中", "贴屏幕底部")
 
-				label(c, "唤起快捷键（只读）", th)
-				ui.Text(c, Hotkey()).FontSize(12).TextColor(th.Text)
+				label(c, "唤起快捷键（accelerator，如 CmdOrCtrl+Shift+V / Alt+Space；当前 "+a.Hotkey()+"）", th)
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+					ui.TextInput(c, &shortcutDraft).Width(240)
+					if ui.Button(c, "应用快捷键").Clicked() {
+						a.ApplyShortcutDraft(shortcutDraft)
+					}
+					if ui.Button(c, "恢复默认").Clicked() {
+						a.ApplyShortcutDraft(settings.DefaultShortcut)
+					}
+				})
+				if msg := a.ShortcutMessage(); msg != "" {
+					ui.Text(c, msg).FontSize(11).TextColor(th.TextMuted)
+				}
+
+				ui.Divider(c)
+				ui.Text(c, "历史清理").FontSize(14).Bold().TextColor(th.Text)
+				label(c, "清掉多少天之前的条目（收藏与置顶受保护）", th)
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+					ui.NumberInput(c, &pruneDays, 1, 3650, 1)
+					if ui.Button(c, "按天数清理").Clicked() {
+						a.PruneOlderThanDays(int(pruneDays))
+					}
+				})
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+					if a.ClearConfirming() {
+						if ui.Button(c, "再点一次确认清空全部").Clicked() {
+							a.ClearAllHistory()
+						}
+						if ui.Button(c, "取消").Clicked() {
+							a.CancelClearAll()
+						}
+					} else if ui.Button(c, "清空全部历史…").Clicked() {
+						a.AskClearAll()
+					}
+				})
 
 				label(c, "敏感应用白名单（每行一个 bundle id / 进程名；留空用内置表）", th)
 				ui.TextArea(c, &sensitiveApps).Height(90)

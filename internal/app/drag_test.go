@@ -93,3 +93,31 @@ func TestFilterBarAndPreviewLayout(t *testing.T) {
 		t.Fatalf("480 宽应当只剩列表：%+v", narrow)
 	}
 }
+
+// TestSearchFiltersAndHighlights 查询词既过滤列表也产生高亮分段。
+func TestSearchFiltersAndHighlights(t *testing.T) {
+	a := newTestApp(t)
+	record(t, a, "银河系漫游指南：测试文档一")
+	record(t, a, "另一个银河系条目 带 emoji 🚀")
+	record(t, a, "无关的第三条文本")
+
+	a.SetQuery("银河")
+	rows := a.Rows()
+	if len(rows) != 2 {
+		t.Fatalf("应当只剩 2 条命中，实际 %d", len(rows))
+	}
+	for _, row := range rows {
+		spans := highlightSpans(row.Summary, "银河", ui.Color{}, ui.Color{})
+		if spans == nil {
+			t.Fatalf("行 %q 里没有高亮分段", row.Summary)
+		}
+	}
+	a.SetQuery("文本")
+	if got := len(a.Rows()); got != 1 {
+		t.Fatalf("「文本」应当命中 1 条，实际 %d", got)
+	}
+	a.SetQuery("")
+	if got := len(a.Rows()); got != 3 {
+		t.Fatalf("清空查询应当回到 3 条，实际 %d", got)
+	}
+}

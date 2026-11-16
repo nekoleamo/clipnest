@@ -2,6 +2,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -42,6 +43,7 @@ type Row struct {
 	Favorite   bool
 	Sensitive  bool
 	UseCount   int64
+	Content    string
 	Note       string
 	GroupID    *int64
 	GroupName  string
@@ -78,6 +80,11 @@ type App struct {
 	axPrompted atomic.Bool
 	// dragProbe 只在测试里用：拖拽开始时把载荷交出去断言
 	dragProbe func(transfer.Data)
+	// 设置窗里的跨帧草稿与状态
+	shortcutDraft string
+	shortcutMsg   string
+	pruneDays     float64
+	clearConfirm  bool
 	// kindFilter 是顶部筛选：0 全部 / 1 收藏 / 2 置顶 / 3 图片 / 4 文件
 	kindFilter int
 	// groupFilter 是分组筛选："" 全部、"\x00" 未分组、其它为分组名
@@ -300,6 +307,7 @@ func (a *App) rowOf(item model.Item) Row {
 		Favorite:  item.Favorite,
 		Sensitive: item.Sensitive,
 		UseCount:  item.UseCount,
+		Content:   item.Content,
 		Note:      item.Note,
 		GroupID:   item.GroupID,
 	}
@@ -1012,6 +1020,146 @@ func (a *App) StartAutoSync() {
 // SortRowsStable 让行顺序稳定（调试用）。
 func SortRowsStable(rows []Row) {
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].ID < rows[j].ID })
+}
+
+// ShortcutDraft 是设置窗里快捷键输入框的草稿（跨帧保留）。
+func (a *App) ShortcutDraft() *string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.shortcutDraft == "" {
+		a.shortcutDraft = a.Settings.Shortcut
+	}
+	return &a.shortcutDraft
+}
+
+// ShortcutMessage 是上次改快捷键的结果提示。
+func (a *App) ShortcutMessage() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.shortcutMsg
+}
+
+// ApplyShortcutDraft 应用输入框里的快捷键，并把结果记成提示。
+func (a *App) ApplyShortcutDraft(acc string) {
+	err := a.ApplyShortcut(acc)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err != nil {
+		a.shortcutMsg = "❌ " + err.Error()
+		return
+	}
+	a.shortcutDraft = a.Settings.Shortcut
+	a.shortcutMsg = "✅ 已改为 " + HotkeyText(a.Settings.Shortcut) + "（立即生效）"
+}
+
+// PruneDaysDraft 是「清理多少天前」输入框的草稿。
+func (a *App) PruneDaysDraft() *float64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.pruneDays <= 0 {
+		a.pruneDays = 30
+	}
+	return &a.pruneDays
+}
+
+// PruneOlderThanDays 删掉 N 天前的条目（收藏与置顶受保护）。
+func (a *App) PruneOlderThanDays(days int) {
+	if days <= 0 {
+		a.SetStatus("⚠️ 天数要大于 0")
+		return
+	}
+	cutoff := time.Now().AddDate(0, 0, -days).UTC().Format(time.RFC3339)
+	n, err := a.Store.PruneOlderThan(cutoff)
+	if err != nil {
+		logf("PRUNE AGE ERROR %v", err)
+		a.SetStatus("❌ 清理失败：" + err.Error())
+		return
+	}
+	logf("PRUNE AGE days=%d deleted=%d", days, n)
+	a.SetStatus(fmt.Sprintf("✅ 清理了 %d 条（%d 天前）", n, days))
+	a.Refresh()
+}
+
+// AskClearAll / ClearConfirming / CancelClearAll 是「清空全部」的两步确认。
+func (a *App) AskClearAll() {
+	a.mu.Lock()
+	a.clearConfirm = true
+	a.mu.Unlock()
+	a.invalidate()
+}
+
+func (a *App) ClearConfirming() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.clearConfirm
+}
+
+func (a *App) CancelClearAll() {
+	a.mu.Lock()
+	a.clearConfirm = false
+	a.mu.Unlock()
+	a.invalidate()
+}
+
+// ClearAllHistory 真的清空（含收藏与置顶）。
+func (a *App) ClearAllHistory() {
+	n, err := a.Store.ClearAll()
+	a.mu.Lock()
+	a.clearConfirm = false
+	a.mu.Unlock()
+	if err != nil {
+		logf("CLEAR ALL ERROR %v", err)
+		a.SetStatus("❌ 清空失败：" + err.Error())
+		return
+	}
+	logf("CLEAR ALL deleted=%d", n)
+	a.SetStatus(fmt.Sprintf("✅ 已清空 %d 条历史", n))
+	a.Refresh()
+}
+
+// Hotkey 是当前生效的唤出快捷键展示文案（⌘⇧V 这类）。
+func (a *App) Hotkey() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return HotkeyText(a.Settings.Shortcut)
+}
+
+// ShortcutAccelerator 是当前生效的 accelerator 原文。
+func (a *App) ShortcutAccelerator() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.Settings.Shortcut
+}
+
+// ApplyShortcut 换唤出快捷键：注销旧的、注册新的，失败就回滚到旧的。
+func (a *App) ApplyShortcut(acc string) error {
+	acc = strings.TrimSpace(acc)
+	if acc == "" {
+		return errors.New("快捷键不能为空")
+	}
+	a.mu.Lock()
+	old := a.Settings.Shortcut
+	a.mu.Unlock()
+	if acc == old {
+		return nil
+	}
+	mygo.GlobalShortcut.Unregister(old)
+	if err := mygo.GlobalShortcut.Register(acc, a.TogglePanel); err != nil {
+		// 回滚，别让用户丢了原来的快捷键
+		_ = mygo.GlobalShortcut.Register(old, a.TogglePanel)
+		return fmt.Errorf("注册 %s 失败（可能被别的应用占用）：%w", acc, err)
+	}
+	next := a.Settings
+	next.Shortcut = acc
+	if err := settings.Save(next, a.Paths); err != nil {
+		return fmt.Errorf("保存设置失败：%w", err)
+	}
+	a.mu.Lock()
+	a.Settings = next
+	a.mu.Unlock()
+	a.refreshTrayMenu()
+	logf("SHORTCUT now %s (%s)", acc, HotkeyText(acc))
+	return nil
 }
 
 // RequestAccessibility 处理「去授权」：

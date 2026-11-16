@@ -95,9 +95,15 @@ func main() {
 			log.Printf("托盘创建失败：%v", err)
 		}
 
-		// 全局快捷键：唤出/收起面板
-		if err := mygo.GlobalShortcut.Register("CmdOrCtrl+Shift+V", a.TogglePanel); err != nil {
-			log.Printf("快捷键注册失败（可能被占用）：%v", err)
+		// 全局快捷键：唤出/收起面板（用户可在设置里改）
+		log.Printf("SHORTCUT register %s", a.Settings.Shortcut)
+		if err := mygo.GlobalShortcut.Register(a.Settings.Shortcut, a.TogglePanel); err != nil {
+			log.Printf("快捷键 %s 注册失败（可能被占用），回退默认：%v", a.Settings.Shortcut, err)
+			if err := mygo.GlobalShortcut.Register(settings.DefaultShortcut, a.TogglePanel); err != nil {
+				log.Printf("默认快捷键也注册不了：%v", err)
+			} else {
+				log.Printf("SHORTCUT fell back to %s", settings.DefaultShortcut)
+			}
 		}
 
 		// 窗口都建好了：之后才允许 Invalidate（之前调用会等主线程而死锁）
@@ -118,6 +124,11 @@ func main() {
 
 		// 第二个实例被唤起时（用户又点了图标）把面板亮出来
 		mygo.App.OnSecondInstance(func(_ []string, _ string) { a.Show() })
+
+		// 自检钩子：`open -a clipnest.app --args -prefs` 启动就打开设置窗
+		if hasArg("-prefs") {
+			time.AfterFunc(1500*time.Millisecond, func() { a.OpenPrefs() })
+		}
 
 		// 自检钩子：`open -a clipnest.app --args -ax-prompt` 直接弹辅助功能授权提示
 		// （tccutil reset 之后重新登记用，不必拿鼠标去点面板里的按钮）

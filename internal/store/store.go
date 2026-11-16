@@ -215,6 +215,80 @@ func (s *Store) Remove(id int64) (bool, error) {
 	return true, nil
 }
 
+// PruneOlderThan 删掉 updated_at 早于 cutoff（RFC3339）的条目；收藏与置顶受保护（契约 9）。
+func (s *Store) PruneOlderThan(cutoff string) (int, error) {
+	rows, err := s.DB.Query(`SELECT id FROM items
+		WHERE updated_at < ? AND pinned = 0 AND favorite = 0
+		ORDER BY updated_at`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	var victims []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		victims = append(victims, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	deleted := 0
+	for _, id := range victims {
+		ok, err := s.Remove(id)
+		if err != nil {
+			return deleted, err
+		}
+		if ok {
+			deleted++
+		}
+	}
+	if deleted > 0 {
+		_, _ = s.CollectGarbage()
+	}
+	return deleted, nil
+}
+
+// ClearAll 清空全部历史（收藏与置顶也一并删掉——这是用户明确点的动作）。
+//
+// 图片文件逐条删，最后再扫一次孤儿。
+func (s *Store) ClearAll() (int, error) {
+	rows, err := s.DB.Query("SELECT id FROM items")
+	if err != nil {
+		return 0, err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	deleted := 0
+	for _, id := range ids {
+		ok, err := s.Remove(id)
+		if err != nil {
+			return deleted, err
+		}
+		if ok {
+			deleted++
+		}
+	}
+	_, _ = s.CollectGarbage()
+	return deleted, nil
+}
+
 // deleteImageFiles 删掉某个图片条目的原图与缩略图（文件不在就跳过）。
 func (s *Store) deleteImageFiles(content string) {
 	hash := strings.TrimSuffix(content, ".png")

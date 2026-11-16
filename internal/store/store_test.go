@@ -403,3 +403,48 @@ func itoa(v int64) string {
 	}
 	return string(buf[i:])
 }
+
+// TestPruneOlderThanAndClearAll 按时间清理（收藏/置顶受保护）与清空全部。
+func TestPruneOlderThanAndClearAll(t *testing.T) {
+	s := newStore(t)
+	var ids []int64
+	for i := 0; i < 4; i++ {
+		res, err := db.Upsert(s.DB, model.NewText("老条目"+itoa(int64(i))))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, res.ID)
+	}
+	yes := true
+	if err := db.UpdateMeta(s.DB, ids[0], db.MetaPatch{Pinned: &yes}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 把 cutoff 放到未来：除了受保护的那条，其余都该被删
+	future := model.Now()
+	time.Sleep(5 * time.Millisecond)
+	future = model.Now()
+	deleted, err := s.PruneOlderThan(future)
+	if err != nil {
+		t.Fatalf("按时间清理失败：%v", err)
+	}
+	if deleted != 3 {
+		t.Fatalf("应当删 3 条，实际 %d", deleted)
+	}
+	left, _ := db.Query(s.DB, "", db.Filter{}, db.Page{Limit: 10})
+	if len(left) != 1 || left[0].ID != ids[0] {
+		t.Fatalf("只该剩置顶那条：%+v", left)
+	}
+
+	// 清空全部：连置顶的也删
+	cleared, err := s.ClearAll()
+	if err != nil {
+		t.Fatalf("清空失败：%v", err)
+	}
+	if cleared != 1 {
+		t.Fatalf("应当清 1 条，实际 %d", cleared)
+	}
+	if n, _ := s.Count(); n != 0 {
+		t.Fatalf("清空后还剩 %d 条", n)
+	}
+}

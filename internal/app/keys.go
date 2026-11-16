@@ -8,6 +8,7 @@ package app
 import (
 	"fmt"
 	"runtime"
+	"strings"
 )
 
 // macOS 的展示符号。
@@ -26,12 +27,62 @@ const (
 	winHintsShort = "⏎ 粘贴 · Ctrl+1-9 直贴 · Ctrl+D 删 · Ctrl+S 收藏"
 )
 
-// Hotkey 是唤出面板的快捷键展示文案。
+// Hotkey 是默认快捷键的展示文案（没有自定义时用）。
 func Hotkey() string {
 	if runtime.GOOS == "darwin" {
 		return macHotkey
 	}
 	return winHotkey
+}
+
+// HotkeyText 把 accelerator 转成展示文案：
+// CmdOrCtrl+Shift+V → ⌘⇧V（macOS）/ Ctrl+Shift+V（其它平台）。
+func HotkeyText(acc string) string {
+	parts := strings.Split(strings.TrimSpace(acc), "+")
+	mods := ""
+	key := ""
+	for _, raw := range parts {
+		p := strings.TrimSpace(raw)
+		if p == "" {
+			continue
+		}
+		switch strings.ToLower(p) {
+		case "cmdorctrl", "commandorcontrol", "cmd", "command", "super", "meta":
+			mods += "⌘"
+		case "ctrl", "control":
+			if runtime.GOOS == "darwin" {
+				mods += "⌃"
+			} else {
+				mods += "Ctrl+"
+			}
+		case "shift":
+			mods += "⇧"
+		case "alt", "option", "opt":
+			mods += "⌥"
+		default:
+			key = p
+		}
+	}
+	if key == "" {
+		return acc
+	}
+	if runtime.GOOS != "darwin" {
+		// 非 macOS 用朴素写法：Ctrl+Shift+V
+		flat := ""
+		for _, raw := range parts {
+			p := strings.TrimSpace(raw)
+			switch strings.ToLower(p) {
+			case "cmdorctrl", "commandorcontrol", "cmd", "command", "super", "meta", "ctrl", "control":
+				flat += "Ctrl+"
+			case "shift":
+				flat += "Shift+"
+			case "alt", "option", "opt":
+				flat += "Alt+"
+			}
+		}
+		return flat + key
+	}
+	return mods + strings.ToUpper(key)
 }
 
 // Hints 是面板底部的操作提示。

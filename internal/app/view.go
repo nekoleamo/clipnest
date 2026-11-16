@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/egoist/mygo/transfer"
@@ -292,6 +293,7 @@ func (a *App) bindKeys(c *ui.Context, after *[]func()) {
 // listView 是左栏列表。
 func (a *App) listView(c *ui.Context, after *[]func()) {
 	th := c.Theme()
+	q := a.Query()
 	rows := a.Rows()
 	sel, _ := a.Selection()
 
@@ -346,7 +348,7 @@ func (a *App) listView(c *ui.Context, after *[]func()) {
 							if row.Sensitive {
 								mark += "🔒 "
 							}
-							ui.Text(c, mark+row.Summary).FontSize(12).TextColor(fg).Grow(1).Ellipsis("…")
+							a.summaryText(c, mark+row.Summary, q, fg, th).FontSize(12).TextColor(fg).Grow(1).Ellipsis("…")
 							if row.UseCount > 1 {
 								ui.Text(c, fmt.Sprintf("×%d", row.UseCount)).FontSize(9).TextColor(fg)
 							}
@@ -393,6 +395,13 @@ func (a *App) previewView(c *ui.Context, after *[]func(), l panelLayout) {
 			ui.Text(c, fmt.Sprintf("%d×%d", row.Width, row.Height)).FontSize(11).TextColor(th.TextMuted)
 		}
 
+		// 文本类条目：直接看内容（命中的关键词高亮）
+		if row.Kind == model.KindText || row.Kind == model.KindHtml || row.Kind == model.KindRtf {
+			if content := excerpt(row.Content, 240); content != "" {
+				a.summaryText(c, content, a.Query(), th.TextMuted, th).FontSize(11).Wrap()
+			}
+		}
+
 		// 分组：直接给这条选一个组（组在设置窗里建）
 		groups := a.Groups()
 		names := make([]string, 0, len(groups)+1)
@@ -432,6 +441,69 @@ func (a *App) previewView(c *ui.Context, after *[]func(), l panelLayout) {
 			*after = append(*after, func() { a.SaveNote(row.ID, text) })
 		}
 	})
+}
+
+// summaryText 是带搜索高亮的文本：命中 query 的片段用强调色 + 加粗。
+//
+// 没查询词或者没命中时就是普通 Text；命中时切成 RichText 分段。
+func (a *App) summaryText(c *ui.Context, text, query string, base ui.Color, th *ui.Theme) ui.Element {
+	spans := highlightSpans(text, query, base, th.Accent)
+	if len(spans) == 0 {
+		return ui.Text(c, text)
+	}
+	return ui.RichText(c, spans...).TextColor(base)
+}
+
+// highlightSpans 把 text 里所有命中 query 的片段切出来（大小写不敏感）。
+// 没命中返回 nil，调用方退回普通文本。
+func highlightSpans(text, query string, base, hi ui.Color) []ui.Span {
+	q := []rune(strings.ToLower(strings.TrimSpace(query)))
+	if len(q) == 0 {
+		return nil
+	}
+	runes := []rune(text)
+	lower := []rune(strings.ToLower(text))
+
+	var spans []ui.Span
+	hit := false
+	start := 0
+	for i := 0; i+len(q) <= len(lower); {
+		match := true
+		for j := range q {
+			if lower[i+j] != q[j] {
+				match = false
+				break
+			}
+		}
+		if !match {
+			i++
+			continue
+		}
+		hit = true
+		if i > start {
+			spans = append(spans, ui.Span{Text: string(runes[start:i]), Color: base})
+		}
+		spans = append(spans, ui.Span{Text: string(runes[i : i+len(q)]), Color: hi, Weight: 600})
+		i += len(q)
+		start = i
+	}
+	if !hit {
+		return nil
+	}
+	if start < len(runes) {
+		spans = append(spans, ui.Span{Text: string(runes[start:]), Color: base})
+	}
+	return spans
+}
+
+// excerpt 把内容压平换行并按字符截断。
+func excerpt(text string, maxChars int) string {
+	flat := strings.NewReplacer("\n", " ", "\r", " ").Replace(text)
+	runes := []rune(flat)
+	if len(runes) <= maxChars {
+		return flat
+	}
+	return string(runes[:maxChars]) + "…"
 }
 
 // emptyState 是列表空态文案：区分「搜不到」与「还没有历史」。

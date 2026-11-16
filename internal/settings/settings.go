@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"clipnest/internal/paths"
 )
@@ -41,6 +42,8 @@ type Settings struct {
 	IgnoreSensitiveApps bool `json:"ignore_sensitive_apps"`
 	// ExportDir 是导出目录（空 = ~/Downloads）。
 	ExportDir string `json:"export_dir"`
+	// Shortcut 是唤出面板的全局快捷键（accelerator，如 CmdOrCtrl+Shift+V）。
+	Shortcut string `json:"shortcut"`
 	// HideAccessibilityHint 关掉面板顶部那条「没有辅助功能授权」提示（用户自己知道就行）。
 	// 授权状态真变了会自动恢复正常显示（见 tray 里的菜单项）。
 	HideAccessibilityHint bool `json:"hide_accessibility_hint"`
@@ -55,8 +58,12 @@ func Default() Settings {
 		SensitiveApps:       nil,
 		IgnoreSensitiveApps: true,
 		ExportDir:           "",
+		Shortcut:            DefaultShortcut,
 	}
 }
+
+// DefaultShortcut 是默认的唤出快捷键。
+const DefaultShortcut = "CmdOrCtrl+Shift+V"
 
 // Normalize 把越界的值拉回合法范围（手改过 json 也安全）。
 func Normalize(s Settings) Settings {
@@ -74,6 +81,10 @@ func Normalize(s Settings) Settings {
 	}
 	if s.PanelHeight > PanelHeightMax {
 		s.PanelHeight = PanelHeightMax
+	}
+	s.Shortcut = strings.TrimSpace(s.Shortcut)
+	if s.Shortcut == "" {
+		s.Shortcut = DefaultShortcut
 	}
 	return s
 }
