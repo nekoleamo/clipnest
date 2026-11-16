@@ -94,6 +94,33 @@ var keepAlive []uintptr
 func objcClass(name string) uintptr { return initWithCString(classFn, name) }
 func objcSel(name string) uintptr   { return initWithCString(selFn, name) }
 
+// trustOptions 用 NSDictionary 造 AXIsProcessTrustedWithOptions 的选项。
+//
+// 不用 CoreFoundation 的 kCFBooleanTrue 常量：在 dyld shared cache 里 dlsym 出来
+// 那个值不是可用对象，当 value 塞进 CFDictionaryCreate 会直接段错（2026-11-16 实测）。
+// NSDictionary/NSNumber 与 CF 是 toll-free bridged，同样能被 AX 接受。
+func trustOptions() uintptr {
+	objcOnce.Do(initObjC)
+	if objcErr != nil {
+		return 0
+	}
+	nsString := objcClass("NSString")
+	if nsString == 0 {
+		return 0
+	}
+	key := initWithCString(func(p uintptr) uintptr {
+		return msgSend3(nsString, objcSel("stringWithUTF8String:"), p, 0)
+	}, "AXTrustedCheckOptionPrompt")
+	if key == 0 {
+		return 0
+	}
+	yes := msgSend3(objcClass("NSNumber"), objcSel("numberWithBool:"), 1, 0)
+	if yes == 0 {
+		return 0
+	}
+	return msgSend4(objcClass("NSDictionary"), objcSel("dictionaryWithObject:forKey:"), yes, key, 0)
+}
+
 // frontPID 是当前前台应用的 pid（拿不到返回 0）。
 func frontPID() int64 {
 	objcOnce.Do(initObjC)

@@ -65,8 +65,19 @@ func (a *App) panelView(c *ui.Context) {
 			ui.Row(c).Fill().Gap(6).Children(func() {
 				ui.Text(c, "⚠️ 没有辅助功能授权，回车只复制不粘贴").
 					FontSize(11).TextColor(th.Warning).Grow(1)
-				if ui.Button(c, "去授权").Clicked() {
-					paste.PromptTrust() // 弹系统授权提示，把 app 加进名单
+				grantBtn := ui.Button(c, "去授权")
+				if b := grantBtn.Bounds(); b.W > 0 && os.Getenv("CLIPNEST_DEBUG_RECTS") != "" {
+					logf("RECT grant x=%.0f y=%.0f w=%.0f h=%.0f", b.X, b.Y, b.W, b.H)
+				}
+				if grantBtn.Clicked() {
+					logf("AXP click")
+					// 先收起面板：它是 floating window，会把刚打开的系统设置盖住
+					a.Dismiss()
+					// 授权提示走另一个 goroutine：万一系统调用卡住，不连带卡死 UI
+					go func() {
+						trusted := paste.PromptTrust()
+						logf("AXP prompt trusted=%v", trusted)
+					}()
 					openAccessibilitySettings()
 				}
 			})

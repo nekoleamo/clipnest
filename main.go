@@ -6,8 +6,10 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -32,7 +34,8 @@ func main() {
 	}
 	defer a.Store.Close()
 
-	// 日志出口：stdout（打包后由系统日志收集）
+	// 日志出口：stdout + 数据目录里的 clipnest.log（LaunchServices 启动时 stdout 去不了任何地方）
+	setupLogFile(p)
 	store.Logf = log.Printf
 	settings.Logf = log.Printf
 	clipsync.Logf = log.Printf
@@ -153,6 +156,23 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("EXIT App.Run")
+}
+
+// setupLogFile 把日志同时写到 <data>/clipnest.log（超过 2 MB 就轮转一份 .1）。
+func setupLogFile(p paths.Paths) {
+	const maxSize = 2 << 20
+	path := filepath.Join(p.Root(), "clipnest.log")
+	if err := os.MkdirAll(p.Root(), 0o755); err != nil {
+		return
+	}
+	if st, err := os.Stat(path); err == nil && st.Size() > maxSize {
+		_ = os.Rename(path, path+".1")
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	log.SetOutput(io.MultiWriter(os.Stderr, f))
 }
 
 // trayIcon 生成 32×32 的模板图标（黑+透明，macOS 会按菜单栏配色染）。

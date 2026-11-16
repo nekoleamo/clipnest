@@ -70,8 +70,10 @@ func openAccessibilitySettings() {
 	}
 	if err := exec.Command("open",
 		"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility").Run(); err != nil {
-		logf("OPEN accessibility settings failed: %v", err)
+		logf("AXP open settings failed: %v", err)
+		return
 	}
+	logf("AXP opened settings")
 }
 
 // max 返回较大值。
