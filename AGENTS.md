@@ -65,7 +65,7 @@ docs/            路线图、执行计划、验证记录
 14. **面板 `OnClose` 里无条件 `PreventDefault` 会让 `App.Quit()` 静默失败**：`prepareQuit` 会关所有窗口，关不掉就取消退出。要在 `OnBeforeQuit` 里置「正在退出」标志，退出流程中跳过 PreventDefault
 15. 打包：`go get -tool github.com/egoist/mygo/cmd/mygo` 后 `go tool mygo build`，配置在 `mygo.json`（native UI 项目不用 TS 配置）
 16. **中文输入法下 `TextInput.Submitted()` 需要第二次回车**：合成期间 AppKit 把 `KeyPressed` 扣住（mygo `surface.keyDown` 的 `withheld` 分支），只有 `KeyUp` 到达，第一次 ⏎ 只提交候选。不输入直接 ⏎ 一次就粘；`⌘1-9` 带 Cmd 不受输入法影响。另外 `OnWindowShortcut(0, ui.KeyEnter)` 永远不会触发——焦点在输入框时 Enter 被编辑框优先吃掉，要判提交就用 `Submitted()`
-17. 签名：**本项目已改用固定自签身份 `clipnest-dev`（`mygo.json` 的 `macos.signingIdentity`）**，重打包后钥匙串 ACL 与辅助功能授权都保持不变，不用再点。若换到新机器/丢了身份，跑 `tools/signing-identity.sh` 重建，否则 `mygo build` 会回退 ad-hoc（cdhash），于是又回到「每次重打包要重新点钥匙串 + 重勾辅助功能」；而且失败很隐蔽——读口令的调用会静默卡在系统弹框上、日志一行没有，先用 `go run ./cmd/syncprobe -probe`（不碰钥匙串）区分网络还是授权
+17. 签名与 TCC：**已改用固定自签身份 `clipnest-dev`（`mygo.json` 的 `macos.signingIdentity`）**，实测重打包后辅助功能授权与钥匙串 ACL 都保持不变，不用再点。两个坑：①从 ad-hoc 换到证书时，TCC 里会残留一条匹配不上的旧记录（日志：`Failed to match existing code requirement`），面板就会永远提示去授权——`tccutil reset Accessibility com.clipnest.app` 后重新勾一次就好；②若换机器/丢了身份（`mygo build` 回退 ad-hoc cdhash），授权会每次重打包失效，跑 `tools/signing-identity.sh` 重建。排查入口：`<data>/clipnest.log` 里的 `SHOW ax=`、`go run ./cmd/syncprobe -probe`、`open -a clipnest.app --args -ax-prompt`
 
 ## 每轮收尾
 
