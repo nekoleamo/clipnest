@@ -34,12 +34,15 @@ func (a *App) prefsView(c *ui.Context) {
 	}
 	syncDir := cfg.Backend.Path
 	remoteURL := cfg.Backend.URL
+	fallbackURL := cfg.Backend.FallbackURL
 	remoteUser := cfg.Backend.Username
 	remoteDir := cfg.Backend.RemoteDir
 	deviceName := cfg.DeviceName
 	interval := float64(cfg.IntervalSecs)
 	insecure := cfg.Backend.InsecureTLS
 	encrypt := cfg.Encryption.Enabled
+	realtime := cfg.Realtime
+	pullSecs := float64(cfg.PullIntervalSecs())
 	passphrase := ""
 
 	var status string
@@ -67,10 +70,12 @@ func (a *App) prefsView(c *ui.Context) {
 		nextCfg.DeviceName = deviceName
 		nextCfg.IntervalSecs = int64(interval)
 		nextCfg.Encryption.Enabled = encrypt
+		nextCfg.Realtime = realtime
+		nextCfg.PullSecs = int64(pullSecs)
 		if backendKind == 1 {
 			nextCfg.Backend = clipsync.Backend{
-				Kind: clipsync.BackendWebDav, URL: remoteURL, Username: remoteUser,
-				RemoteDir: remoteDir, InsecureTLS: insecure,
+				Kind: clipsync.BackendWebDav, URL: remoteURL, FallbackURL: fallbackURL,
+				Username: remoteUser, RemoteDir: remoteDir, InsecureTLS: insecure,
 			}
 		} else {
 			nextCfg.Backend = clipsync.Backend{Kind: clipsync.BackendLocalDir, Path: syncDir}
@@ -131,6 +136,8 @@ func (a *App) prefsView(c *ui.Context) {
 				} else {
 					label(c, "WebDAV 地址（如 https://nas.local:5006/data/dav）", th)
 					ui.TextInput(c, &remoteURL)
+					label(c, "备用地址（Tailscale / 外网；局域网不通时自动切过去）", th)
+					ui.TextInput(c, &fallbackURL).Placeholder("https://nas.<tailnet>.ts.net:5006")
 					label(c, "用户名 / 口令（口令写进系统钥匙串）", th)
 					ui.TextInput(c, &remoteUser)
 					ui.TextInput(c, &passphrase).Placeholder("口令 / 同步口令（留空不改）")
@@ -141,6 +148,9 @@ func (a *App) prefsView(c *ui.Context) {
 				ui.Checkbox(c, &encrypt, "端到端加密（用口令派生密钥）")
 				label(c, "自动同步间隔（秒；<60 不自动跑）", th)
 				ui.NumberInput(c, &interval, 0, 86400, 300)
+				ui.Checkbox(c, &realtime, "实时同步（复制后立即推，并按下面间隔拉取）")
+				label(c, "实时拉取间隔（秒，2–300）", th)
+				ui.NumberInput(c, &pullSecs, 2, 300, 1)
 
 				ui.Divider(c)
 				ui.Text(c, "备份").FontSize(14).Bold().TextColor(th.Text)

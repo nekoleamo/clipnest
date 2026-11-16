@@ -250,27 +250,37 @@ func (t *WebDavTransport) Remove(name string) error {
 	}
 }
 
-// OpenTransport 按配置建传输层。
-func OpenTransport(c Config) (Transport, error) {
+// OpenTransport 按配置建传输层，并返回实际用的入口（WebDAV 会在局域网/Tailscale 间选）。
+func OpenTransport(c Config) (Transport, Endpoint, error) {
 	switch c.Backend.Kind {
 	case BackendLocalDir:
 		if err := os.MkdirAll(c.Backend.Path, 0o755); err != nil {
-			return nil, fmt.Errorf("建同步目录失败：%w", err)
+			return nil, Endpoint{}, fmt.Errorf("建同步目录失败：%w", err)
 		}
-		return NewLocalTransport(c.Backend.Path), nil
+		return NewLocalTransport(c.Backend.Path), Endpoint{Label: "本地目录", URL: c.Backend.Path}, nil
 	case BackendWebDav:
-		return NewWebDavTransport(c.Backend.URL, c.Backend.RemoteDir, c.Backend.Username,
-			webdavPassword(c), c.Backend.InsecureTLS), nil
+		ep, err := ResolveEndpoint(c.Backend, ProbeTimeout)
+		if err != nil {
+			return nil, Endpoint{}, err
+		}
+		return NewWebDavTransport(ep.URL, c.Backend.RemoteDir, c.Backend.Username,
+			webdavPassword(c), c.Backend.InsecureTLS), ep, nil
 	default:
-		return nil, errors.New("没有可用的同步方式")
+		return nil, Endpoint{}, errors.New("没有可用的同步方式")
 	}
 }
 
-// webdavPassword 从钥匙串取口令（取不到给空串，让服务器自己拒绝）。
+// webdavPassword 从钥匙串取口令。
+//
+// 先按设备名找（现在的写法）；早期版本按用户名存，找不到时兼容回退。
 func webdavPassword(c Config) string {
-	pw, err := secretGet(WebDavSecretService, c.DeviceName)
-	if err != nil {
-		return ""
+	if pw, err := secretGet(WebDavSecretService, c.DeviceName); err == nil && pw != "" {
+		return pw
 	}
-	return pw
+	if c.Backend.Username != "" {
+		if pw, err := secretGet(WebDavSecretService, c.Backend.Username); err == nil {
+			return pw
+		}
+	}
+	return ""
 }

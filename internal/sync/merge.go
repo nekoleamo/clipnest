@@ -74,6 +74,8 @@ type SyncReport struct {
 	BlobsPushed int
 	BlobsPulled int
 	Applied     ApplyReport
+	// Endpoint 是本轮实际用的入口（局域网 / Tailscale / 本地目录）。
+	Endpoint string
 }
 
 // ExportChanges 导出「自 since 之后变化」的条目与墓碑；since 为 nil 表示全量。

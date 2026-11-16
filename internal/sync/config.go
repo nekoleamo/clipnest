@@ -37,9 +37,13 @@ const (
 )
 
 // Backend 是同步后端（对应旧的 internally-tagged 枚举）。
+//
+// WebDAV 支持两个地址：URL 是局域网（快），FallbackURL 是 Tailscale / 外网。
+// 每轮同步前先探局域网，不通再走备用（探测结果缓存 5 分钟）。
 type Backend struct {
 	Kind        BackendKind `json:"kind"`
 	URL         string      `json:"url,omitempty"`
+	FallbackURL string      `json:"fallback_url,omitempty"`
 	Username    string      `json:"username,omitempty"`
 	RemoteDir   string      `json:"remote_dir,omitempty"`
 	InsecureTLS bool        `json:"insecure_tls,omitempty"`
@@ -53,12 +57,30 @@ type Encryption struct {
 
 // Config 是 sync.json。
 type Config struct {
-	Version      int        `json:"version"`
-	Enabled      bool       `json:"enabled"`
-	DeviceName   string     `json:"device_name"`
-	Backend      Backend    `json:"backend"`
-	Encryption   Encryption `json:"encryption"`
-	IntervalSecs int64      `json:"interval_secs"`
+	Version    int        `json:"version"`
+	Enabled    bool       `json:"enabled"`
+	DeviceName string     `json:"device_name"`
+	Backend    Backend    `json:"backend"`
+	Encryption Encryption `json:"encryption"`
+	// IntervalSecs 是普通模式的定时同步间隔（<60 不自动跑）。
+	IntervalSecs int64 `json:"interval_secs"`
+	// Realtime 打开时：采集后 1.2 秒推到远端，并按 PullSecs 短间隔拉取。
+	Realtime bool `json:"realtime"`
+	// PullSecs 是实时模式下两轮拉取的间隔（秒），默认 5。
+	PullSecs int64 `json:"pull_secs"`
+}
+
+// PullInterval 是实际使用的实时拉取间隔（夹紧到 2–300 秒）。
+const PullDefaultSecs = 5
+
+func (c Config) PullIntervalSecs() int64 {
+	if c.PullSecs < 2 {
+		return PullDefaultSecs
+	}
+	if c.PullSecs > 300 {
+		return 300
+	}
+	return c.PullSecs
 }
 
 // DefaultConfig 是默认配置（关掉、开加密）。
@@ -70,6 +92,8 @@ func DefaultConfig() Config {
 		Backend:      Backend{Kind: BackendOff},
 		Encryption:   Encryption{Enabled: true},
 		IntervalSecs: 1800,
+		Realtime:     true,
+		PullSecs:     PullDefaultSecs,
 	}
 }
 
@@ -79,7 +103,11 @@ func (c Config) Summary() string {
 	case BackendOff:
 		return "未启用"
 	case BackendWebDav:
-		return "WebDAV " + c.Backend.URL + c.Backend.RemoteDir
+		s := "WebDAV " + c.Backend.URL + c.Backend.RemoteDir
+		if c.Backend.FallbackURL != "" {
+			s += "（备用 " + c.Backend.FallbackURL + "）"
+		}
+		return s
 	case BackendLocalDir:
 		return "本地目录 " + c.Backend.Path
 	default:
@@ -97,6 +125,10 @@ func (c Config) Normalize() Config {
 	switch c.Backend.Kind {
 	case BackendWebDav:
 		c.Backend.URL = strings.TrimRight(strings.TrimSpace(c.Backend.URL), "/")
+		c.Backend.FallbackURL = strings.TrimRight(strings.TrimSpace(c.Backend.FallbackURL), "/")
+		if c.Backend.FallbackURL == c.Backend.URL {
+			c.Backend.FallbackURL = "" // 两个写一样就不算备用
+		}
 		dir := strings.TrimSpace(c.Backend.RemoteDir)
 		switch {
 		case dir == "":

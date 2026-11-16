@@ -18,7 +18,7 @@ func RunOnce(db *sql.DB, cfg Config, p paths.Paths) (SyncReport, error) {
 	if err := cfg.Ready(); err != nil {
 		return SyncReport{}, err
 	}
-	transport, err := OpenTransport(cfg)
+	transport, ep, err := OpenTransport(cfg)
 	if err != nil {
 		return SyncReport{}, err
 	}
@@ -30,9 +30,22 @@ func RunOnce(db *sql.DB, cfg Config, p paths.Paths) (SyncReport, error) {
 			return SyncReport{}, errors.New("钥匙串里没有同步口令（先在设置里填一个）")
 		}
 		seal, open := backup.Sealer(passphrase)
-		return syncRound(db, transport, device, p, seal, open)
+		return runRound(db, transport, ep, device, p, seal, open, cfg)
 	}
-	return syncRound(db, transport, device, p, backup.Plain, backup.Plain)
+	return runRound(db, transport, ep, device, p, backup.Plain, backup.Plain, cfg)
+}
+
+// runRound 跑一轮并把入口写进报告；失败时清掉端点缓存，下一轮重新探测。
+func runRound(db *sql.DB, transport Transport, ep Endpoint, deviceID string, p paths.Paths,
+	encode, decode Coder, cfg Config) (SyncReport, error) {
+	report, err := syncRound(db, transport, deviceID, p, encode, decode)
+	report.Endpoint = ep.String()
+	if err != nil {
+		ForgetEndpoint(cfg.Backend)
+		return report, err
+	}
+	Logf("SYNC via %s", report.Endpoint)
+	return report, nil
 }
 
 // syncRound 把本地增量推上去，再把别的设备的增量拉下来合并。

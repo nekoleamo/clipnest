@@ -64,6 +64,15 @@ type App struct {
 	ready bool
 	// captureMu 序列化采集（OnChanged 可能并发投递，两个回调同时入库会撞唯一键）
 	captureMu sync.Mutex
+	// syncBusy/syncPending 保证同一时刻只跑一轮同步，期间的请求结束后补跑
+	syncBusy    atomic.Bool
+	syncPending atomic.Bool
+	// debounce 是实时模式下的采集防抖定时器
+	debounceMu sync.Mutex
+	debounce   *time.Timer
+	// lastSync/lastSyncVia 是最近一次成功的同步时间与入口
+	lastSync    string
+	lastSyncVia string
 	// opens 是打开次数，面板据此判断「又开了一次」要不要重置查询。
 	opens int
 }
@@ -601,6 +610,7 @@ func (a *App) Capture() {
 	logf("CAPTURE flavors=%s excerpt=%q %s", snap.Flavors, snap.Excerpt, strings.Join(labels, " "))
 	a.Prune()
 	a.Refresh()
+	a.RequestRealtimeSync() // 实时模式：1.2 秒后把这条推到远端
 }
 
 // Prune 按设置裁剪历史（收藏与置顶受保护）。
@@ -617,33 +627,84 @@ func (a *App) Prune() {
 
 // StartSync 在后台跑一轮同步（UI 不卡）。
 func (a *App) StartSync() {
+	clipsync.ResetEndpointCache() // 手动同步：重新探一次局域网/Tailscale
+	go a.runSync(true)
+}
+
+// RequestRealtimeSync 是采集后的防抖触发：1.2 秒内多次复制只跑一轮。
+func (a *App) RequestRealtimeSync() {
 	cfg := clipsync.LoadConfig(a.Paths)
-	if err := cfg.Ready(); err != nil {
-		a.setSyncStatus("⚠️ " + err.Error())
+	if !cfg.Enabled || !cfg.Realtime {
 		return
 	}
-	a.setSyncStatus("同步中…")
-	go func() {
-		report, err := clipsync.RunOnce(a.Store.DB, cfg, a.Paths)
-		if err != nil {
-			logf("SYNC ERROR %v", err)
-			a.setSyncStatus("❌ " + err.Error())
-			return
+	a.debounceMu.Lock()
+	if a.debounce != nil {
+		a.debounce.Stop()
+	}
+	a.debounce = time.AfterFunc(1200*time.Millisecond, func() { a.runSync(false) })
+	a.debounceMu.Unlock()
+}
+
+// runSync 跑一轮同步；loud 为 true 时把过程写进面板底部状态。
+//
+// 同一时刻只跑一轮：正在跑时再来的请求置 pending，结束后补跑一次。
+func (a *App) runSync(loud bool) {
+	if !a.syncBusy.CompareAndSwap(false, true) {
+		a.syncPending.Store(true)
+		return
+	}
+	defer func() {
+		a.syncBusy.Store(false)
+		if a.syncPending.Swap(false) {
+			a.runSync(false)
 		}
-		logf("SYNC ok pushed=%d pulled=%d +%d ~%d -%d blobs=%d/%d",
-			report.Pushed, report.Pulled, report.Applied.Inserted, report.Applied.Updated,
-			report.Applied.Deleted, report.BlobsPushed, report.BlobsPulled)
-		a.setSyncStatus(fmt.Sprintf("✅ %d 推送 / %d 拉取（新增 %d、更新 %d、删除 %d）",
-			report.Pushed, report.Pulled, report.Applied.Inserted, report.Applied.Updated, report.Applied.Deleted))
-		a.Refresh()
 	}()
+
+	cfg := clipsync.LoadConfig(a.Paths)
+	if err := cfg.Ready(); err != nil {
+		if loud {
+			a.setSyncStatus("⚠️ " + err.Error())
+		}
+		return
+	}
+	if loud {
+		a.setSyncStatus("同步中…")
+	}
+	report, err := clipsync.RunOnce(a.Store.DB, cfg, a.Paths)
+	if err != nil {
+		logf("SYNC ERROR %v", err)
+		a.setSyncStatus("❌ " + err.Error())
+		return
+	}
+	applied := report.Applied.Inserted + report.Applied.Updated + report.Applied.Deleted
+	logf("SYNC ok via=%s pushed=%d pulled=%d +%d ~%d -%d blobs=%d/%d",
+		report.Endpoint, report.Pushed, report.Pulled, report.Applied.Inserted,
+		report.Applied.Updated, report.Applied.Deleted, report.BlobsPushed, report.BlobsPulled)
+	a.mu.Lock()
+	a.lastSync = model.Now()
+	a.lastSyncVia = report.Endpoint
+	a.mu.Unlock()
+	// 实时模式下「什么都没变」就不吐状態，免得每 5 秒闪一下
+	if loud || report.Pushed > 0 || applied > 0 {
+		a.setSyncStatus(fmt.Sprintf("✅ %s · 推 %d / 拉 %d（改动 %d）",
+			report.Endpoint, report.Pushed, report.Pulled, applied))
+	}
+	if applied > 0 {
+		a.Refresh()
+	}
 }
 
 // SyncStatus 是最近一次同步的状态文字。
 func (a *App) SyncStatus() string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.syncMsg
+	if a.syncMsg != "" {
+		return a.syncMsg
+	}
+	if a.lastSync == "" {
+		return ""
+	}
+	return "上次同步 " + model.RelativeTime(a.lastSync) + " · " + a.lastSyncVia
 }
 
 func (a *App) setSyncStatus(text string) {
@@ -653,19 +714,25 @@ func (a *App) setSyncStatus(text string) {
 	a.invalidate()
 }
 
-// StartAutoSync 按配置的间隔定时同步（0 或 <60 秒不自动跑）。
+// StartAutoSync 开自动同步：实时模式走短间隔拉取，否则用 IntervalSecs。
 func (a *App) StartAutoSync() {
 	cfg := clipsync.LoadConfig(a.Paths)
-	if !cfg.Enabled || cfg.IntervalSecs < 60 {
+	if !cfg.Enabled {
 		return
 	}
-	logf("SYNC interval=%ds", cfg.IntervalSecs)
+	period := time.Duration(cfg.IntervalSecs) * time.Second
+	if cfg.Realtime {
+		period = time.Duration(cfg.PullIntervalSecs()) * time.Second
+	} else if cfg.IntervalSecs < 60 {
+		return
+	}
+	logf("SYNC loop period=%s realtime=%v", period, cfg.Realtime)
 	go func() {
-		ticker := time.NewTicker(time.Duration(cfg.IntervalSecs) * time.Second)
+		ticker := time.NewTicker(period)
 		defer ticker.Stop()
 		for range ticker.C {
 			if clipsync.LoadConfig(a.Paths).Enabled {
-				a.StartSync()
+				a.runSync(false)
 			}
 		}
 	}()
