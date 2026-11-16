@@ -3,7 +3,9 @@ package app
 import (
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -59,6 +61,17 @@ func homeDir() (string, error) {
 		return h, nil
 	}
 	return os.UserHomeDir()
+}
+
+// openAccessibilitySettings 打开系统设置的「辅助功能」授权页。
+func openAccessibilitySettings() {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	if err := exec.Command("open",
+		"x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility").Run(); err != nil {
+		logf("OPEN accessibility settings failed: %v", err)
+	}
 }
 
 // max 返回较大值。

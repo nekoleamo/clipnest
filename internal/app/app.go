@@ -151,6 +151,7 @@ func (a *App) Refresh() {
 	items, err := db.Query(a.Store.DB, q, db.Filter{}, db.Page{Limit: PageSize})
 	if err != nil {
 		logf("QUERY ERROR %v", err)
+		a.SetStatus("❌ 读库失败：" + err.Error())
 		return
 	}
 	rows := make([]Row, 0, len(items))
@@ -499,6 +500,7 @@ func (a *App) Show() {
 	if w == nil {
 		return
 	}
+	logf("SHOW")
 	// 面板不激活 app，但仍要记住「刚才在哪个应用」以便粘贴后切回去。
 	paste.RememberForeground()
 
@@ -534,6 +536,7 @@ func (a *App) Dismiss() {
 	if w == nil {
 		return
 	}
+	logf("DISMISS")
 	w.Hide()
 	a.mu.Lock()
 	a.visible = false

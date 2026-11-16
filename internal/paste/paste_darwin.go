@@ -88,6 +88,33 @@ func Trusted() bool {
 	return axTrustedFn()
 }
 
+// PromptTrust 弹系统的「辅助功能」授权提示（把 app 加进名单），返回当前是否已授权。
+//
+// 否则用户得自己去设置里点「+」找到这个 .app，体验差一截。
+// 等价于 AXIsProcessTrustedWithOptions({kAXTrustedCheckOptionPrompt: true})。
+func PromptTrust() bool {
+	if noAX() {
+		return false
+	}
+	if err := initCF(); err != nil || axTrustedWithOptionsFn == nil {
+		return Trusted()
+	}
+	name := []byte("AXTrustedCheckOptionPrompt")
+	key := cfStringCreate(0, &name[0], cfStringEncodingUTF8)
+	if key == 0 {
+		return Trusted()
+	}
+	defer cfRelease(key)
+	keys := [1]uintptr{key}
+	values := [1]uintptr{cfBoolTrue}
+	dict := cfDictionaryCreate(0, &keys[0], &values[0], 1, cfTypeDictKeyCB, cfTypeDictValCB)
+	if dict == 0 {
+		return Trusted()
+	}
+	defer cfRelease(dict)
+	return axTrustedWithOptionsFn(dict)
+}
+
 // SendCmdV 发一次 ⌘V（进程内 CGEvent）。
 func SendCmdV() bool {
 	if err := init_(); err != nil {

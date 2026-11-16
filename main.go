@@ -110,6 +110,22 @@ func main() {
 		// 第二个实例被唤起时（用户又点了图标）把面板亮出来
 		mygo.App.OnSecondInstance(func(_ []string, _ string) { a.Show() })
 
+		// 自检钩子：CLIPNEST_AUTOLOGIN=1 注册登录项，=0 取消（macOS 走 SMAppService）
+		switch os.Getenv("CLIPNEST_AUTOLOGIN") {
+		case "1", "true":
+			if err := mygo.App.SetOpenAtLogin(true); err != nil {
+				log.Printf("AUTOLOGIN on err=%v", err)
+			} else {
+				log.Printf("AUTOLOGIN on now=%v", mygo.App.OpenAtLogin())
+			}
+		case "0", "false":
+			if err := mygo.App.SetOpenAtLogin(false); err != nil {
+				log.Printf("AUTOLOGIN off err=%v", err)
+			} else {
+				log.Printf("AUTOLOGIN off now=%v", mygo.App.OpenAtLogin())
+			}
+		}
+
 		// 自检钩子：CLIPNEST_AUTOOPEN=1 启动 2 秒后自动弹面板；CLIPNEST_AUTOQUIT=<秒> 到点退出
 		if os.Getenv("CLIPNEST_AUTOOPEN") != "" {
 			time.AfterFunc(2*time.Second, func() {
@@ -129,7 +145,7 @@ func main() {
 		}
 
 		total, _ := a.Store.Count()
-		log.Printf("BOOT 数据=%s 历史=%d 设置=%+v", p.Root(), total, a.Settings)
+		log.Printf("BOOT 数据=%s 历史=%d 登录项=%v 设置=%+v", p.Root(), total, mygo.App.OpenAtLogin(), a.Settings)
 	})
 
 	log.Printf("ENTER App.Run")

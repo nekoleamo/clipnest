@@ -111,6 +111,9 @@ func ReturnToPreviousApp() bool {
 	return ok != 0
 }
 
+// PromptTrust 在 Windows 上无需授权，直接返回当前状态。
+func PromptTrust() bool { return Trusted() }
+
 // ClaimForeground 把自己的可见顶层窗口抢回前台。
 //
 // Windows 上「能收键盘」= 必须是前台窗口；系统可能因为前台锁拒绝，那就只返回 false。

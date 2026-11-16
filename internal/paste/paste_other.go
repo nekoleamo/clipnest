@@ -20,3 +20,6 @@ func ReturnToPreviousApp() bool { return false }
 
 // ClaimForeground 不做事。
 func ClaimForeground() bool { return true }
+
+// PromptTrust 在这个平台上没有实现。
+func PromptTrust() bool { return Trusted() }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"clipnest/internal/model"
 	"clipnest/internal/paste"
 )
 
@@ -58,10 +59,17 @@ func (a *App) panelView(c *ui.Context) {
 		}
 	}
 
-	ui.Column(c).Fill().Gap(8).Padding(8).Background(th.Background).Children(func() {
+	root := ui.Column(c).Fill().Gap(8).Padding(8).Background(th.Background)
+	root.Children(func() {
 		if !paste.Trusted() {
-			ui.Text(c, "⚠️ 需要在「系统设置 → 隐私与安全性 → 辅助功能」里授权 clipnest，才能自动粘贴").
-				FontSize(11).TextColor(th.Warning)
+			ui.Row(c).Fill().Gap(6).Children(func() {
+				ui.Text(c, "⚠️ 没有辅助功能授权，回车只复制不粘贴").
+					FontSize(11).TextColor(th.Warning).Grow(1)
+				if ui.Button(c, "去授权").Clicked() {
+					paste.PromptTrust() // 弹系统授权提示，把 app 加进名单
+					openAccessibilitySettings()
+				}
+			})
 		}
 		a.searchField(c, &after)
 		a.bindKeys(c, &after)
@@ -209,7 +217,11 @@ func (a *App) listView(c *ui.Context, after *[]func()) {
 						})
 				}
 				if len(rows) == 0 {
-					ui.Text(c, "没有匹配的条目").FontSize(12).TextColor(th.TextMuted).Padding(8)
+					title, hint := emptyState(a.Query())
+					ui.Column(c).Fill().Justify(ui.Center).AlignItems(ui.Center).Gap(4).Children(func() {
+						ui.Text(c, title).FontSize(13).TextColor(th.TextMuted)
+						ui.Text(c, hint).FontSize(11).TextColor(th.TextMuted)
+					})
 				}
 			})
 		})
@@ -228,7 +240,11 @@ func (a *App) previewView(c *ui.Context) {
 			if b := bitmapFor(row.OriginPath); b != nil {
 				w, h := fitSize(row.Width, row.Height, previewWidth, 320)
 				ui.Image(c, b).Size(w, h).Fit(ui.Contain).Radius(8)
+			} else {
+				ui.Text(c, "⚠️ 原图读不出来（文件可能已被清理）").FontSize(11).TextColor(th.Warning)
 			}
+		} else if row.Kind == model.KindImage {
+			ui.Text(c, "⚠️ 原图文件缺失").FontSize(11).TextColor(th.Warning)
 		}
 		ui.Text(c, fmt.Sprintf("%s · %s", row.Tag, row.Time)).FontSize(11).TextColor(th.TextMuted)
 		if row.Width > 0 && row.Height > 0 {
@@ -238,6 +254,14 @@ func (a *App) previewView(c *ui.Context) {
 			ui.Text(c, row.Note).FontSize(11).TextColor(th.Text)
 		}
 	})
+}
+
+// emptyState 是列表空态文案：区分「搜不到」与「还没有历史」。
+func emptyState(q string) (title, hint string) {
+	if q != "" {
+		return fmt.Sprintf("没有匹配「%s」的条目", q), "换个更短的关键词试试"
+	}
+	return "还没有历史记录", "复制文字、图片或文件，会自动收进这里"
 }
 
 // fitSize 按比例把图片塞进 maxW × maxH（等比，不裁切）。
