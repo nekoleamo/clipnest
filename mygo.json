@@ -7,5 +7,8 @@
   "publisher": "clipnest",
   "license": "MIT",
   "main": ".",
-  "out": "dist"
+  "out": "dist",
+  "macos": {
+    "signingIdentity": "clipnest-dev"
+  }
 }
