@@ -4,6 +4,9 @@
 package paste
 
 // Trusted 报告是否可以自动粘贴。
+// NeedsTrust 报告是否需要「辅助功能授权」（非 macOS 平台没有这道门）。
+func NeedsTrust() bool { return false }
+
 func Trusted() bool { return false }
 
 // SendCmdV 在这个平台上没有实现。

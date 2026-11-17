@@ -1,4 +1,9 @@
-# Windows 冒烟清单（P2 之后的插入点）
+# Windows 冒烟清单（nsh 时代，已归档参考）
+
+> ⚠️ **本文是 nsh/Rust 时代的记录**（cargo/nsh 交叉编译、Inno Setup 那些步骤都不适用了）。
+> Go + mygo 版的 Windows 冒烟请按 `windows-能力对照.md` 的逐项表执行；
+> 产物是 `dist/windows-amd64/clipnest.exe`（`go tool mygo build -platform windows/amd64`），
+> 拷到 Windows 双击即可，不需要在 Windows 上装工具链。
 
 > 目的：只用最少的事确认「nsh 的 Windows 后端能不能撑起 clipnest」，避免 P4 同步投入建立在错误假设上（路线图 R1）。
 > 结论分三档：**通过**（继续做 P5）、**部分通过**（记录缺口，能绕就绕）、**不成立**（换壳或放弃双端）。

@@ -78,6 +78,9 @@ func init_() error {
 // Trusted 报告是否已获得辅助功能授权（自动粘贴的前置条件）。
 //
 // 自检：SPIKE_NO_AX=1 假装没授权，用来验面板的权限提示条。
+// NeedsTrust 报告这个平台是否需要「辅助功能授权」才能自动粘贴（只有 macOS 有这道门）。
+func NeedsTrust() bool { return true }
+
 func Trusted() bool {
 	if noAX() {
 		return false

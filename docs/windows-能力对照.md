@@ -26,11 +26,21 @@
 | 16 | 图片存储 | `images/{origin,thumbnails}/<hh>/<hash>.png`（blake3 命名） | 同（纯文件操作） | 🔵 平台无关 |
 | 17 | 导出 | `⌘O` 写文件 + `mygo.Clipboard.WriteFiles()` | 同一套（`CF_HDROP`） | ⚠️ 待真机 |
 | 18 | 同步 | `internal/sync`：WebDAV（`net/http` 自定义 PROPFIND/MKCOL/PUT）+ 端到端加密 | 同一套（纯 Go HTTP） | 🔵 平台无关 |
-| 19 | 单实例 | `mygo.json` 未配单实例；旧实现用 nsh `singleInstance` | ⚠️ **尚未实现**（见下） | ❌ 待做 |
+| 19 | 单实例 | `mygo.App.RequestSingleInstanceLock()` + `OnSecondInstance` 唤出面板 | 同一套（框架用命名 socket/互斥量，第二实例转发 argv 后退出） | 🔵 代码一致，⚠️ 待真机 |
+
+| 20 | 列表分页 | 一页 200 条、滚到底续页、顶栏显示真实总数 | 同一套（`db.CountQuery` + `ui.ScrollState`，与平台无关） | 🔵 平台无关 |
+| 21 | 键盘导航 | `↑↓←→`、`PgUp/PgDn` 翻页、`⌘F` 回搜索框、`⌥⏎` 纯文本 | 同一套（`ui.Cmd` 在 Windows 是 Ctrl，`ui.Alt` 是 Alt） | 🔵 代码一致，⚠️ 待真机（Alt+⏎ 会不会被输入框吃掉） |
+| 22 | 暂停记录 | 托盘勾选「暂停记录」，暂停期间不读剪贴板 | 同一套（`Shell_NotifyIcon` 菜单勾选项） | 🔵 代码一致，⚠️ 待真机 |
+| 23 | 粘贴为纯文本 | `clip.PlainText`：HTML 剥标签、RTF 去壳、文件给路径 | 同一套（纯逻辑，与平台无关） | 🔵 平台无关 |
+| 24 | 批量删除 | `⌘/Ctrl` 点击勾选、右键全选、`⌘D` 删勾选 | 同一套（`ClickModifiers()&ui.Cmd` 在 Windows 就是 Ctrl） | 🔵 代码一致，⚠️ 待真机 |
+| 25 | 导出/备份对话框 | `mygo.Dialog.Save/Open`（文本选文件、文件条目选目录、备份选 `.cnbak`） | 同一套（`IFileDialog`） | 🔵 代码一致，⚠️ 待真机 |
+| 26 | 日志 | `<数据根>/clipnest.log`，运行期 2MB 轮转成 `.1` | 同一套（纯文件操作） | 🔵 平台无关 |
+| 27 | 托盘菜单项 | 辅助功能授权两项**只在 macOS 出现**（`paste.NeedsTrust()`） | 不显示，其余一致 | 🔵 代码一致 |
+| 28 | 键位文案 | 底栏/状态里的命令键走 `ModPrefix()`：⌘ / Ctrl+ | 同一函数按 `runtime.GOOS` 切换 | 🔵 平台无关 |
 
 ## 二、已知缺口
 
-1. **单实例**：Go 版还没做。方案：`mygo` 的 `SingleInstance` API（`mygo.SingleInstance` 存在）或自建命名锁（Windows 命名互斥量 / macOS flock）。真机冒烟前必须补，否则双开会出现两个托盘图标。
+1. **RTF 条目在 Windows 上不会产生**：`mygo` 的剪贴板没有映射 Windows 的 `Rich Text Format`（只注册了 `HTML Format`、`PNG`），所以 `clip.Capture` 拿不到 `text/rtf`。影响：Windows 复制富文本只会落 HTML/纯文本条目；拿到 macOS 同步过来的 RTF 条目仍可粘贴（写回时带 `text/plain` 兜底）。要补只能在框架侧注册自定义格式，暂不做。
 2. **Windows 前台锁**：`SetForegroundWindow` 被系统拒绝时面板收不到键盘，代码只记日志（返回 false）。真机需要专项测。
 3. **高 DPI**：位置与尺寸都交给 mygo 的 DIP 空间，理论上不用自己除 scale；真机 200% 缩放下要复测。
 

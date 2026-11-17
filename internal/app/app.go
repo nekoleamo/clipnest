@@ -957,7 +957,7 @@ func (a *App) ToggleMark(id int64) {
 	n := len(a.marked)
 	a.mu.Unlock()
 	if n > 0 {
-		a.SetStatus(fmt.Sprintf("已选 %d 条 · ⌘D 删除 · Esc 取消", n))
+		a.SetStatus(fmt.Sprintf("已选 %d 条 · %sD 删除 · Esc 取消", n, ModPrefix()))
 	} else {
 		a.SetStatus("")
 	}
@@ -981,7 +981,7 @@ func (a *App) MarkAllLoaded() {
 	n := len(a.marked)
 	a.mu.Unlock()
 	if n > 0 {
-		a.SetStatus(fmt.Sprintf("已全选 %d 条 · ⌘D 删除 · Esc 取消", n))
+		a.SetStatus(fmt.Sprintf("已全选 %d 条 · %sD 删除 · Esc 取消", n, ModPrefix()))
 	}
 	a.invalidate()
 }

@@ -27,6 +27,16 @@ const (
 	winHintsShort = "⏎ 粘贴 · Alt+⏎ 纯文本 · Ctrl+1-9 直贴 · Ctrl+D 删 · Ctrl+S 收藏"
 )
 
+// ModPrefix 是「命令键」的展示前缀：macOS 是 ⌘，其它平台是 Ctrl+。
+//
+// 状态文案、底栏提示里不要写死 ⌘，否则 Windows 上会显示成 Mac 的键位。
+func ModPrefix() string {
+	if runtime.GOOS == "darwin" {
+		return "⌘"
+	}
+	return "Ctrl+"
+}
+
 // Hotkey 是默认快捷键的展示文案（没有自定义时用）。
 func Hotkey() string {
 	if runtime.GOOS == "darwin" {

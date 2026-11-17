@@ -120,7 +120,7 @@ func (a *App) panelView(c *ui.Context) {
 			footer = fmt.Sprintf("%d/%d · %s", min(sel, total-1)+1, total, hints)
 		}
 		if n := len(a.Marked()); n > 0 {
-			footer = fmt.Sprintf("已选 %d 条 · ⌘D 删除 · Esc 取消 · ", n) + footer
+			footer = fmt.Sprintf("已选 %d 条 · %sD 删除 · Esc 取消 · ", n, ModPrefix()) + footer
 		}
 		if a.Paused() {
 			footer = "⏸ 已暂停记录 · " + footer
@@ -542,7 +542,7 @@ func (a *App) previewView(c *ui.Context, l panelLayout) {
 				a.later(func() { a.ExportTo(r) }) // 先选保存位置，不静默写到导出目录
 			})
 			ui.Box(c).Grow(1)
-			ui.Text(c, "⌘Y / ⌘O").FontSize(10).TextColor(th.TextMuted)
+			ui.Text(c, ModPrefix()+"Y / "+ModPrefix()+"O").FontSize(10).TextColor(th.TextMuted)
 		})
 	})
 }

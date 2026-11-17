@@ -46,6 +46,9 @@ type input struct {
 	ki  keyboardInput
 }
 
+// NeedsTrust 报告是否需要「辅助功能授权」（Windows 没有这道门）。
+func NeedsTrust() bool { return false }
+
 // Trusted 在 Windows 上没有授权门槛。
 func Trusted() bool { return true }
 
