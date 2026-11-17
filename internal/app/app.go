@@ -1588,7 +1588,9 @@ func (a *App) StartAutoSync() {
 		for range ticker.C {
 			a.CheckSyncStuck() // 上一轮卡死（比如在等钥匙串授权）就放开，别永久静默
 			if clipsync.LoadConfig(a.Paths).Enabled {
-				a.runSync(false)
+				// 必须另起 goroutine：这一轮如果卡在钥匙串弹窗上，
+				// 直接在这里同步调用会把 ticker 循环本身堵死，看门狗跟着一起停摆。
+				go a.runSync(false)
 			}
 		}
 	}()
