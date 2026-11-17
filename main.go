@@ -18,6 +18,7 @@ import (
 
 	"clipnest/internal/app"
 	"clipnest/internal/clip"
+	"clipnest/internal/logfile"
 	"clipnest/internal/paste"
 	"clipnest/internal/paths"
 	"clipnest/internal/settings"
@@ -220,20 +221,15 @@ func hasArg(want string) bool {
 }
 
 // setupLogFile 把日志同时写到 <data>/clipnest.log（超过 2 MB 就轮转一份 .1）。
+// setupLogFile 把日志写到 stderr + <数据根>/clipnest.log，超过 2MB 自动轮转成 .1。
+//
+// 常驻进程一跑好几天，轮转必须发生在运行期（logfile.Writer），不能只在启动查一次。
 func setupLogFile(p paths.Paths) {
-	const maxSize = 2 << 20
-	path := filepath.Join(p.Root(), "clipnest.log")
-	if err := os.MkdirAll(p.Root(), 0o755); err != nil {
-		return
-	}
-	if st, err := os.Stat(path); err == nil && st.Size() > maxSize {
-		_ = os.Rename(path, path+".1")
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	w, err := logfile.Open(filepath.Join(p.Root(), "clipnest.log"), 2<<20)
 	if err != nil {
 		return
 	}
-	log.SetOutput(io.MultiWriter(os.Stderr, f))
+	log.SetOutput(io.MultiWriter(os.Stderr, w))
 }
 
 // trayIcon 生成 32×32 的模板图标（黑+透明，macOS 会按菜单栏配色染）。

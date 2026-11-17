@@ -44,7 +44,8 @@ func runRound(db *sql.DB, transport Transport, ep Endpoint, deviceID string, p p
 		ForgetEndpoint(cfg.Backend)
 		return report, err
 	}
-	Logf("SYNC via %s", report.Endpoint)
+	// 这里不再每轮写日志：常驻进程 5 秒一轮，安静的时候不该刷屏。
+	// 调用方（app.runSync）只在「有变化」时才记一行，含入口在内。
 	return report, nil
 }
 

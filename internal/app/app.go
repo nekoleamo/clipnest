@@ -1242,13 +1242,18 @@ func (a *App) runSync(loud bool) {
 		return
 	}
 	applied := report.Applied.Inserted + report.Applied.Updated + report.Applied.Deleted
-	logf("SYNC ok via=%s pushed=%d pulled=%d +%d ~%d -%d blobs=%d/%d",
-		report.Endpoint, report.Pushed, report.Pulled, report.Applied.Inserted,
-		report.Applied.Updated, report.Applied.Deleted, report.BlobsPushed, report.BlobsPulled)
+	// 实时模式下 5 秒一轮：只有真有变化（或入口换了）才记日志，否则日志几小时就上兆
+	moved := report.Pushed > 0 || applied > 0 || report.BlobsPushed > 0 || report.BlobsPulled > 0
 	a.mu.Lock()
+	endpointChanged := a.lastSyncVia != "" && a.lastSyncVia != report.Endpoint
 	a.lastSync = model.Now()
 	a.lastSyncVia = report.Endpoint
 	a.mu.Unlock()
+	if moved || endpointChanged || loud {
+		logf("SYNC ok via=%s pushed=%d pulled=%d +%d ~%d -%d blobs=%d/%d",
+			report.Endpoint, report.Pushed, report.Pulled, report.Applied.Inserted,
+			report.Applied.Updated, report.Applied.Deleted, report.BlobsPushed, report.BlobsPulled)
+	}
 	// 实时模式下「什么都没变」就不吐状態，免得每 5 秒闪一下
 	if loud || report.Pushed > 0 || applied > 0 {
 		a.setSyncStatus(fmt.Sprintf("✅ %s · 推 %d / 拉 %d（改动 %d）",
