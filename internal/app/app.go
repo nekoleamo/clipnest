@@ -78,6 +78,8 @@ type App struct {
 	// syncBusy/syncPending 保证同一时刻只跑一轮同步，期间的请求结束后补跑
 	syncBusy    atomic.Bool
 	syncPending atomic.Bool
+	// syncStartedAt 是当前这轮开始的时刻（UnixNano，0 = 没在跑），卡住时靠它发现
+	syncStartedAt atomic.Int64
 	// debounce 是实时模式下的采集防抖定时器
 	debounceMu sync.Mutex
 	debounce   *time.Timer
@@ -1449,6 +1451,27 @@ func (a *App) StartSync() {
 	go a.runSync(true)
 }
 
+// CheckSyncStuck 看当前这轮是不是卡太久了；卡住就放开标志，让下一轮重试。
+//
+// 定时循环每轮前调它。这里宁可「可能重入」也不能永久卡死：数据库是单连接串行的，
+// 两轮同时跑最多重复推送一次，合并侧幂等。
+func (a *App) CheckSyncStuck() bool {
+	started := a.syncStartedAt.Load()
+	if started == 0 {
+		return false
+	}
+	elapsed := time.Since(time.Unix(0, started))
+	if elapsed < SyncStuckAfter {
+		return false
+	}
+	a.syncBusy.Store(false)
+	a.syncStartedAt.Store(0)
+	a.syncPending.Store(false)
+	logf("SYNC stuck %s，已重置（常见原因：钥匙串授权弹窗没人点）", elapsed.Round(time.Second))
+	a.setSyncStatus("⚠️ 同步卡住了，已重置：可能有个钥匙串授权弹窗在等确认")
+	return true
+}
+
 // RequestRealtimeSync 是采集后的防抖触发：1.2 秒内多次复制只跑一轮。
 func (a *App) RequestRealtimeSync() {
 	cfg := clipsync.LoadConfig(a.Paths)
@@ -1466,12 +1489,21 @@ func (a *App) RequestRealtimeSync() {
 // runSync 跑一轮同步；loud 为 true 时把过程写进面板底部状态。
 //
 // 同一时刻只跑一轮：正在跑时再来的请求置 pending，结束后补跑一次。
+// SyncStuckAfter 是一轮同步最多允许占用的时间。
+//
+// 超时就认为它卡死了：常见原因是钥匙串授权弹窗没人点（round 里取口令会一直等），
+// 或者网络栈卡在某个不可路由的地址上。卡住时 syncBusy 一直是 true，后面每一轮都会
+// 被当成「正在跑」静默跳过——表现就是同步再也没动静，日志里也什么都没有。
+const SyncStuckAfter = 2 * time.Minute
+
 func (a *App) runSync(loud bool) {
 	if !a.syncBusy.CompareAndSwap(false, true) {
 		a.syncPending.Store(true)
 		return
 	}
+	a.syncStartedAt.Store(time.Now().UnixNano())
 	defer func() {
+		a.syncStartedAt.Store(0)
 		a.syncBusy.Store(false)
 		if a.syncPending.Swap(false) {
 			a.runSync(false)
@@ -1554,6 +1586,7 @@ func (a *App) StartAutoSync() {
 		ticker := time.NewTicker(period)
 		defer ticker.Stop()
 		for range ticker.C {
+			a.CheckSyncStuck() // 上一轮卡死（比如在等钥匙串授权）就放开，别永久静默
 			if clipsync.LoadConfig(a.Paths).Enabled {
 				a.runSync(false)
 			}

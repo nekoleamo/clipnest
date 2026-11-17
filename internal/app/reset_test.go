@@ -2,6 +2,7 @@ package app
 
 import (
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -90,5 +91,35 @@ func TestPauseStopsCapture(t *testing.T) {
 	a.TogglePause()
 	if a.Paused() {
 		t.Fatal("再 TogglePause 应当恢复")
+	}
+}
+
+// TestSyncStuckWatchdogReleasesBusy 同步卡住（例如钥匙串弹窗没人点）超过阈值后要放开，
+// 否则 syncBusy 一直是 true，后面每一轮都被静默跳过，同步再也不动。
+func TestSyncStuckWatchdogReleasesBusy(t *testing.T) {
+	a := newTestApp(t)
+	if a.CheckSyncStuck() {
+		t.Fatal("没在跑的时候不该判定卡住")
+	}
+
+	a.syncBusy.Store(true)
+	a.syncStartedAt.Store(time.Now().UnixNano())
+	if a.CheckSyncStuck() {
+		t.Fatal("刚开始跑的这轮不算卡住")
+	}
+
+	// 把它「往前拨」到阈值之外
+	a.syncStartedAt.Store(time.Now().Add(-2 * SyncStuckAfter).UnixNano())
+	if !a.CheckSyncStuck() {
+		t.Fatal("超过阈值应当判定卡住并重置")
+	}
+	if a.syncBusy.Load() {
+		t.Fatal("重置后 syncBusy 应当放开")
+	}
+	if a.syncStartedAt.Load() != 0 {
+		t.Fatal("重置后起始时间应当清零")
+	}
+	if s := a.Status(); s == "" {
+		t.Fatal("应当在底栏给一句提示")
 	}
 }
