@@ -34,7 +34,7 @@ type Page struct {
 // DefaultPage 是默认分页。
 var DefaultPage = Page{Limit: 200}
 
-// Query 是列表/搜索主入口。
+// Query 是只要条目的老入口（测试与一次性读取用）。
 func Query(db *sql.DB, q string, filter Filter, page Page) ([]model.Item, error) {
 	where, values := whereClause(q, filter)
 	values = append(values, max0(page.Limit), max0(page.Offset))

@@ -58,6 +58,7 @@ type App struct {
 	// —— 并发原语 ——
 	mu         sync.Mutex // 保护下面所有可变状态
 	captureMu  sync.Mutex // 序列化采集：OnChanged 可能并发投递，两个回调同时入库会撞唯一键
+	sincePrune int        // 上次裁剪之后又进了多少条（裁剪不必每条都跑）
 	debounceMu sync.Mutex // 保护 debounce
 
 	// —— 窗口与视图句柄 ——

@@ -46,12 +46,20 @@ func (a *App) Refresh() {
 	if hasMore {
 		items = items[:limit]
 	}
-	total, err := db.CountQuery(a.Store.DB, q, filter)
-	if err != nil {
-		logf("COUNT ERROR %v", err)
-		total = int64(len(items))
+	// 总数：一整页装得下时 len 就是准数，不必再查；装不下才去 count。
+	//
+	// 试过用 COUNT(*) OVER () 把两条合成一条 SQL：COUNT 在 LIMIT 之前算，
+	// SQLite 得把整个过滤结果物化+排序，实测 314µs 的页面查询变成 4ms（12 倍），
+	// 而单独的 count 只要 3.5µs。所以这里宁可两条，也不合并。
+	total := int64(len(items))
+	if hasMore {
+		n, err := db.CountQuery(a.Store.DB, q, filter)
+		if err != nil {
+			logf("COUNT ERROR %v", err)
+		} else {
+			total = n
+		}
 	}
-
 	rows := make([]Row, 0, len(items))
 	for _, item := range items {
 		row := a.rowOf(item)

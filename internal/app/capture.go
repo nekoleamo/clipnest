@@ -53,7 +53,7 @@ func (a *App) Capture() {
 		labels = append(labels, s.Label())
 	}
 	logf("CAPTURE flavors=%s excerpt=%q %s", snap.Flavors, snap.Excerpt, strings.Join(labels, " "))
-	a.Prune()
+	a.pruneIfDue()
 	a.Refresh()
 	a.RequestRealtimeSync() // 实时模式：1.2 秒后把这条推到远端
 }
@@ -83,6 +83,26 @@ func (a *App) TogglePause() {
 	}
 	if tray != nil {
 		tray.SetMenu(a.buildMenu())
+	}
+}
+
+// pruneEvery 是「隔多少条新记录才裁剪一次」。
+//
+// 裁剪要两条查询（数总数 + 找出该删的），而每复制一次就跑一遍纯属浪费：
+// 条数上限是软约束，短暂超出十几条用户看不见。启动时仍会完整裁一次。
+const pruneEvery = 16
+
+// pruneIfDue 按计数决定这一条要不要触发裁剪（调用方持 captureMu）。
+func (a *App) pruneIfDue() {
+	a.mu.Lock()
+	a.sincePrune++
+	due := a.sincePrune >= pruneEvery
+	if due {
+		a.sincePrune = 0
+	}
+	a.mu.Unlock()
+	if due {
+		a.Prune()
 	}
 }
 

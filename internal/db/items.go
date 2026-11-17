@@ -29,43 +29,25 @@ func Upsert(db *sql.DB, item model.NewItem) (UpsertResult, error) {
 	hash := item.Hash()
 	ts := model.Now()
 
-	tx, err := db.Begin()
-	if err != nil {
-		return UpsertResult{}, err
-	}
-	defer tx.Rollback()
-
-	var existing int64
-	err = tx.QueryRow("SELECT id FROM items WHERE content_hash = ?", hash).Scan(&existing)
-	switch {
-	case err == nil:
-		if _, err := tx.Exec("UPDATE items SET use_count = use_count + 1, updated_at = ? WHERE id = ?", ts, existing); err != nil {
-			return UpsertResult{}, err
-		}
-		if err := tx.Commit(); err != nil {
-			return UpsertResult{}, err
-		}
-		return UpsertResult{ID: existing}, nil
-	case !errors.Is(err, sql.ErrNoRows):
-		return UpsertResult{}, err
-	}
-
-	res, err := tx.Exec(`INSERT INTO items(content_hash, kind, content, file_types, width, height,
+	// 一条语句搞定「有就 use_count+1、没有就插入」（契约 5）。
+	// RETURNING 里用 use_count = 1 判断这次是不是新插入：更新路径一定是 +1 后的值。
+	var (
+		id       int64
+		inserted int64
+	)
+	err := db.QueryRow(`INSERT INTO items(content_hash, kind, content, file_types, width, height,
 			use_count, pinned, favorite, note, group_id, sensitive, created_at, updated_at, meta_at)
-		VALUES (?, ?, ?, ?, ?, ?, 1, 0, 0, NULL, NULL, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, 1, 0, 0, NULL, NULL, ?, ?, ?, ?)
+		ON CONFLICT(content_hash) DO UPDATE SET
+			use_count  = items.use_count + 1,
+			updated_at = excluded.updated_at
+		RETURNING id, (use_count = 1)`,
 		hash, string(item.Kind), item.Content, nullable(item.FileTypes), item.Width, item.Height,
-		boolInt(item.Sensitive), ts, ts, ts)
+		boolInt(item.Sensitive), ts, ts, ts).Scan(&id, &inserted)
 	if err != nil {
 		return UpsertResult{}, err
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return UpsertResult{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return UpsertResult{}, err
-	}
-	return UpsertResult{ID: id, Inserted: true}, nil
+	return UpsertResult{ID: id, Inserted: inserted != 0}, nil
 }
 
 // MetaPatch 是元数据补丁：只写出现的字段。
