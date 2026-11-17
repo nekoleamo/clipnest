@@ -16,10 +16,23 @@ import (
 	"github.com/google/uuid"
 )
 
-// migrations 按序号排列：第 n 个把库从 n-1 推到 n。
+// migrations 按序号排列：第 n 个把库从 n-1 推到 n（在同一个事务里执行）。
 //
-// 已发布的脚本不可修改（用户库里已经跑过），只能追加新脚本。
-var migrations = []string{v1, v2}
+// 已发布的步骤不可修改（用户库里已经跑过），只能追加新步骤。
+// 纯 SQL 的用 sqlMigration 包一层；需要先判断的（比如「加列」）写成函数。
+var migrations = []func(*sql.Tx) error{
+	sqlMigration(v1),
+	sqlMigration(v2),
+	migrateV3,
+}
+
+// sqlMigration 把一段 SQL 变成一个迁移步骤。
+func sqlMigration(text string) func(*sql.Tx) error {
+	return func(tx *sql.Tx) error {
+		_, err := tx.Exec(text)
+		return err
+	}
+}
 
 // SchemaVersion 是当前 schema 版本，等于 migrations 的长度。
 var SchemaVersion = int64(len(migrations))
@@ -91,6 +104,62 @@ CREATE TABLE IF NOT EXISTS tombstones (
 );
 `
 
+// v3：meta_at 记「元数据（置顶/收藏/敏感/备注/分组）最后改动时间」。
+//
+// 契约 6 规定这些改动不刷新 updated_at（否则改个备注条目就跳到列表最前），
+// 但同步的增量是按时间戳挑的——只按 updated_at 挑，元数据改动永远出不了本机。
+// 所以单开一列：updated_at 管内容与使用，meta_at 管元数据。
+//
+// SQLite 没有 ADD COLUMN IF NOT EXISTS，所以先查一遍列再改：这样迁移可以安全重跑
+// （比如 user_version 被外部工具退回 0 的情形）。
+func migrateV3(tx *sql.Tx) error {
+	if has, err := hasColumn(tx, "items", "meta_at"); err != nil {
+		return err
+	} else if !has {
+		if _, err := tx.Exec(`ALTER TABLE items ADD COLUMN meta_at TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	// 老条目：meta_at 补成 updated_at（它们当前状态已经同步过，不会重复推）
+	for _, stmt := range []string{
+		`UPDATE items SET meta_at = updated_at WHERE meta_at = ''`,
+		`CREATE INDEX IF NOT EXISTS items_meta ON items(meta_at)`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// hasColumn 查表里有没有这一列。
+func hasColumn(tx *sql.Tx, table, column string) (bool, error) {
+	rows, err := tx.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	// cid | name | type | notnull | dflt_value | pk
+	cols, err := rows.Columns()
+	if err != nil {
+		return false, err
+	}
+	for rows.Next() {
+		values := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range values {
+			ptrs[i] = &values[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return false, err
+		}
+		if name, ok := values[1].(string); ok && name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
 // ErrTooNew 表示库版本比本程序支持的新，不许降级写。
 var ErrTooNew = errors.New("数据库版本比本程序支持的更新，请升级 clipnest")
 
@@ -116,7 +185,7 @@ func Migrate(db *sql.DB) error {
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(migrations[next-1]); err != nil {
+		if err := migrations[next-1](tx); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("迁移 %d -> %d: %w", current, next, err)
 		}

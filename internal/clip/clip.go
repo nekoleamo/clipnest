@@ -10,6 +10,7 @@ package clip
 import (
 	"strings"
 	"sync"
+	"time"
 
 	"clipnest/internal/model"
 	"clipnest/internal/store"
@@ -134,11 +135,22 @@ func Hashes(cap store.Captured) []string {
 // 比对内容哈希而不是剪贴板版本号：框架不暴露版本号，而内容哈希本身就是天然标识。
 type Guard struct {
 	mu      sync.Mutex
-	pending map[string]struct{}
+	pending map[string]time.Time
 }
 
+// GuardTTL 是登记的有效期。
+//
+// 为什么需要过期：写回后登记哈希，等 OnChanged 看到同一个哈希才消费掉。但剪贴板
+// 监听是 250ms 轮询且会合并变更——这期间用户手快又复制了别的内容，回调只看得到新的，
+// 我们登记的那个就永远挂在表里；之后用户真的复制同一段内容时会被误判成「自己写回」
+// 而静默丢掉。给登记加个有效期，过期自动失效。
+const GuardTTL = 10 * time.Second
+
+// GuardLimit 是登记表的上限（正常情况下只有个位数）。
+const GuardLimit = 64
+
 // NewGuard 建一个空的抑制器。
-func NewGuard() *Guard { return &Guard{pending: make(map[string]struct{})} }
+func NewGuard() *Guard { return &Guard{pending: make(map[string]time.Time)} }
 
 // Expect 登记一次自身写回。
 func (g *Guard) Expect(hashes ...string) {
@@ -147,22 +159,42 @@ func (g *Guard) Expect(hashes ...string) {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	now := time.Now()
+	g.sweep(now)
+	if len(g.pending) > GuardLimit {
+		g.pending = make(map[string]time.Time, len(hashes))
+	}
 	for _, h := range hashes {
-		g.pending[h] = struct{}{}
+		g.pending[h] = now
 	}
 }
 
 // Consume 判断这组哈希里是否有自己刚写回的；命中则清理登记并返回 true。
+//
+// 过期登记会被丢掉，不会命中（见 GuardTTL）。
 func (g *Guard) Consume(hashes ...string) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	now := time.Now()
+	g.sweep(now)
 	for _, h := range hashes {
-		if _, ok := g.pending[h]; ok {
+		if at, ok := g.pending[h]; ok {
 			delete(g.pending, h)
-			return true
+			if now.Sub(at) <= GuardTTL {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// sweep 丢掉过期登记（调用方持锁）。
+func (g *Guard) sweep(now time.Time) {
+	for h, at := range g.pending {
+		if now.Sub(at) > GuardTTL {
+			delete(g.pending, h)
+		}
+	}
 }
 
 // Pending 是还挂着的登记数（诊断用）。

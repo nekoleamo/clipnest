@@ -39,6 +39,9 @@ type SyncItem struct {
 	Sensitive   bool    `json:"sensitive"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
+	// MetaAt 是元数据（置顶/收藏/敏感/备注/分组）最后一次改动的时间；
+	// 契约 6 不刷新 updated_at，所以增量导出要同时看这一列。
+	MetaAt string `json:"meta_at,omitempty"`
 }
 
 // Package 是一台设备一次导出的增量包。
@@ -86,10 +89,10 @@ func ExportChanges(db *sql.DB, since *string) ([]Change, error) {
 	}
 
 	rows, err := db.Query(`SELECT i.content_hash, i.kind, i.content, i.file_types, i.width, i.height,
-			i.use_count, i.pinned, i.favorite, i.note, g.name, i.sensitive, i.created_at, i.updated_at
+			i.use_count, i.pinned, i.favorite, i.note, g.name, i.sensitive, i.created_at, i.updated_at, i.meta_at
 		FROM items i LEFT JOIN groups g ON g.id = i.group_id
-		WHERE i.updated_at > ?
-		ORDER BY i.updated_at, i.id`, sinceAt)
+		WHERE i.updated_at >= ? OR i.meta_at >= ?
+		ORDER BY i.updated_at, i.id`, sinceAt, sinceAt)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +108,7 @@ func ExportChanges(db *sql.DB, since *string) ([]Change, error) {
 		)
 		if err := rows.Scan(&item.ContentHash, &item.Kind, &item.Content, &fileTypes,
 			&width, &height, &item.UseCount, &pinned, &favorite, &note, &group, &sens,
-			&item.CreatedAt, &item.UpdatedAt); err != nil {
+			&item.CreatedAt, &item.UpdatedAt, &item.MetaAt); err != nil {
 			return nil, err
 		}
 		item.FileTypes = nullableStr(fileTypes)
@@ -120,7 +123,9 @@ func ExportChanges(db *sql.DB, since *string) ([]Change, error) {
 		return nil, err
 	}
 
-	tombs, err := db.Query("SELECT content_hash, deleted_at FROM tombstones WHERE deleted_at > ?", sinceAt)
+	// 用 >= 而不是 >：上界是导出前取的 exportedAt，同一毫秒内的改动会正好落在边界上；
+	// 重复发送是幂等的（合并侧按时间戳判新旧），漏发则会永久丢。
+	tombs, err := db.Query("SELECT content_hash, deleted_at FROM tombstones WHERE deleted_at >= ?", sinceAt)
 	if err != nil {
 		return nil, err
 	}
@@ -211,17 +216,19 @@ func mergeItem(tx *sql.Tx, remote *SyncItem) (mergedResult, error) {
 		localID      int64
 		localUses    int64
 		localUpdated string
+		localMeta    string
 	)
-	err := tx.QueryRow("SELECT id, use_count, updated_at FROM items WHERE content_hash = ?",
-		remote.ContentHash).Scan(&localID, &localUses, &localUpdated)
+	err := tx.QueryRow("SELECT id, use_count, updated_at, meta_at FROM items WHERE content_hash = ?",
+		remote.ContentHash).Scan(&localID, &localUses, &localUpdated, &localMeta)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		if _, err := tx.Exec(`INSERT INTO items(content_hash, kind, content, file_types, width, height,
-				use_count, pinned, favorite, note, group_id, sensitive, created_at, updated_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				use_count, pinned, favorite, note, group_id, sensitive, created_at, updated_at, meta_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			remote.ContentHash, remote.Kind, remote.Content, remote.FileTypes, remote.Width,
 			remote.Height, remote.UseCount, boolInt(remote.Pinned), boolInt(remote.Favorite),
-			remote.Note, groupID, boolInt(remote.Sensitive), remote.CreatedAt, remote.UpdatedAt); err != nil {
+			remote.Note, groupID, boolInt(remote.Sensitive), remote.CreatedAt, remote.UpdatedAt,
+			freshAt(remote.UpdatedAt, remote.MetaAt)); err != nil {
 			return mergedSkipped, err
 		}
 		return mergedInserted, nil
@@ -234,7 +241,8 @@ func mergeItem(tx *sql.Tx, remote *SyncItem) (mergedResult, error) {
 	if remote.UseCount > uses {
 		uses = remote.UseCount
 	}
-	if remote.UpdatedAt <= localUpdated {
+	// 谁更新：内容/使用看 updated_at，元数据看 meta_at，取两者里更晚的那个比
+	if freshAt(remote.UpdatedAt, remote.MetaAt) <= freshAt(localUpdated, localMeta) {
 		if uses != localUses {
 			if _, err := tx.Exec("UPDATE items SET use_count = ? WHERE id = ?", uses, localID); err != nil {
 				return mergedSkipped, err
@@ -244,11 +252,12 @@ func mergeItem(tx *sql.Tx, remote *SyncItem) (mergedResult, error) {
 		return mergedSkipped, nil
 	}
 	if _, err := tx.Exec(`UPDATE items SET kind = ?, content = ?, file_types = ?, width = ?, height = ?,
-			use_count = ?, pinned = ?, favorite = ?, note = ?, group_id = ?, sensitive = ?, updated_at = ?
+			use_count = ?, pinned = ?, favorite = ?, note = ?, group_id = ?, sensitive = ?,
+			updated_at = ?, meta_at = ?
 		WHERE id = ?`,
 		remote.Kind, remote.Content, remote.FileTypes, remote.Width, remote.Height, uses,
 		boolInt(remote.Pinned), boolInt(remote.Favorite), remote.Note, groupID,
-		boolInt(remote.Sensitive), remote.UpdatedAt, localID); err != nil {
+		boolInt(remote.Sensitive), remote.UpdatedAt, freshAt(remote.UpdatedAt, remote.MetaAt), localID); err != nil {
 		return mergedSkipped, err
 	}
 	return mergedUpdated, nil
@@ -333,3 +342,13 @@ func boolInt(v bool) int64 {
 }
 
 var _ = time.Now
+
+// freshAt 是「这条数据最后一次变」的时间：内容/使用看 updated_at，元数据看 meta_at。
+//
+// 老版本载荷没有 meta_at（空串），此时退回 updated_at，保持向后兼容。
+func freshAt(updatedAt, metaAt string) string {
+	if metaAt > updatedAt {
+		return metaAt
+	}
+	return updatedAt
+}

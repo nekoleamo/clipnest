@@ -51,10 +51,10 @@ func Upsert(db *sql.DB, item model.NewItem) (UpsertResult, error) {
 	}
 
 	res, err := tx.Exec(`INSERT INTO items(content_hash, kind, content, file_types, width, height,
-			use_count, pinned, favorite, note, group_id, sensitive, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, 1, 0, 0, NULL, NULL, ?, ?, ?)`,
+			use_count, pinned, favorite, note, group_id, sensitive, created_at, updated_at, meta_at)
+		VALUES (?, ?, ?, ?, ?, ?, 1, 0, 0, NULL, NULL, ?, ?, ?, ?)`,
 		hash, string(item.Kind), item.Content, nullable(item.FileTypes), item.Width, item.Height,
-		boolInt(item.Sensitive), ts, ts)
+		boolInt(item.Sensitive), ts, ts, ts)
 	if err != nil {
 		return UpsertResult{}, err
 	}
@@ -118,6 +118,8 @@ func UpdateMeta(db *sql.DB, id int64, patch MetaPatch) error {
 	} else if patch.ClearGroup {
 		set("group_id", nil)
 	}
+	// 契约 6：不刷新 updated_at（列表顺序不变）；但要让同步知道这条元数据变了
+	set("meta_at", model.Now())
 	values = append(values, id)
 
 	_, err := db.Exec(fmt.Sprintf("UPDATE items SET %s WHERE id = ?", joinComma(sets)), values...)

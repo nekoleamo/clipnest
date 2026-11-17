@@ -7,6 +7,7 @@ import (
 	"image/png"
 	"strings"
 	"testing"
+	"time"
 
 	"clipnest/internal/model"
 	"clipnest/internal/store"
@@ -212,5 +213,38 @@ func TestGuardMatchesAnyOfSeveralRegistered(t *testing.T) {
 func TestStripRTFFallsBackToPlainText(t *testing.T) {
 	if got := stripRTF(`{\rtf1\ansi hello\par world}`); got != "hello world" && got != "helloworld" {
 		t.Fatalf("RTF 去壳：%q", got)
+	}
+}
+
+// TestGuardIgnoresStaleExpect 过期登记不再消费：否则用户之后真复制同样内容会被当成自己写回而丢失。
+func TestGuardIgnoresStaleExpect(t *testing.T) {
+	g := NewGuard()
+	h := model.ContentHash(model.KindText, "过期测试")
+	g.Expect(h)
+	if !g.Consume(h) {
+		t.Fatal("刚登记的哈希应当命中")
+	}
+
+	g.Expect(h)
+	// 把登记时间往前拨，模拟「登记后监听没看到就再没回来」
+	g.mu.Lock()
+	g.pending[h] = time.Now().Add(-2 * GuardTTL)
+	g.mu.Unlock()
+	if g.Consume(h) {
+		t.Fatal("过期登记不该再命中（会把用户真复制的内容吞掉）")
+	}
+	if g.Pending() != 0 {
+		t.Fatalf("过期登记应当被清掉，还剩 %d", g.Pending())
+	}
+}
+
+// TestGuardLimitCapsEntries 登记表有上限，异常情况下不会无限长。
+func TestGuardLimitCapsEntries(t *testing.T) {
+	g := NewGuard()
+	for i := 0; i < GuardLimit+20; i++ {
+		g.Expect(model.ContentHash(model.KindText, itoa(int64(i))))
+	}
+	if g.Pending() > GuardLimit+1 {
+		t.Fatalf("登记数 %d 超过上限 %d", g.Pending(), GuardLimit)
 	}
 }
