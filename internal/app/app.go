@@ -80,6 +80,12 @@ type App struct {
 	syncPending atomic.Bool
 	// syncStartedAt 是当前这轮开始的时刻（UnixNano，0 = 没在跑），卡住时靠它发现
 	syncStartedAt atomic.Int64
+	// syncAlive 表示真的还有一轮没返回（只有它返回时才清）。syncBusy 是「逻辑上在跑」，
+	// 卡住时会被强制放开，但不能因此再起一轮：否则钥匙串弹窗点掉的那一下，
+	// 之前每次强放攒下的 goroutine 会同时醒来，一起推同一个包（实测一次冒 7 轮）。
+	syncAlive atomic.Bool
+	// syncStuckLogged 让「卡住」只记一次，不要每 5 秒刷屏
+	syncStuckLogged atomic.Bool
 	// debounce 是实时模式下的采集防抖定时器
 	debounceMu sync.Mutex
 	debounce   *time.Timer
@@ -1451,25 +1457,31 @@ func (a *App) StartSync() {
 	go a.runSync(true)
 }
 
-// CheckSyncStuck 看当前这轮是不是卡太久了；卡住就放开标志，让下一轮重试。
+// CheckSyncStuck 检查当前这轮是不是卡太久了。
 //
-// 定时循环每轮前调它。这里宁可「可能重入」也不能永久卡死：数据库是单连接串行的，
-// 两轮同时跑最多重复推送一次，合并侧幂等。
+// 两分钟：只告警 + 让调用方停止再叠加新轮次（卡住的那一轮还在，攒着没用）。
+// 十分钟：认为它不会回来了，强制放开标志并返回 true（调用方可以重开一轮）。
+//
+// 返回 true 表示可以强行开始新一轮。
 func (a *App) CheckSyncStuck() bool {
 	started := a.syncStartedAt.Load()
 	if started == 0 {
 		return false
 	}
 	elapsed := time.Since(time.Unix(0, started))
-	if elapsed < SyncStuckAfter {
-		return false
+	if elapsed >= SyncHardStuckAfter {
+		a.syncBusy.Store(false)
+		a.syncStartedAt.Store(0)
+		a.syncPending.Store(false)
+		logf("SYNC hard stuck %s：放弃这一轮重开（常见原因：钥匙串授权弹窗一直没人点）", elapsed.Round(time.Second))
+		a.setSyncStatus("⚠️ 同步卡了 10 分钟，已放弃这一轮重开：可能有个钥匙串授权弹窗在等确认")
+		return true
 	}
-	a.syncBusy.Store(false)
-	a.syncStartedAt.Store(0)
-	a.syncPending.Store(false)
-	logf("SYNC stuck %s，已重置（常见原因：钥匙串授权弹窗没人点）", elapsed.Round(time.Second))
-	a.setSyncStatus("⚠️ 同步卡住了，已重置：可能有个钥匙串授权弹窗在等确认")
-	return true
+	if elapsed >= SyncStuckAfter && a.syncStuckLogged.CompareAndSwap(false, true) {
+		logf("SYNC stuck %s：先不再叠加新轮次（可能在等钥匙串授权）", elapsed.Round(time.Second))
+		a.setSyncStatus("⚠️ 同步卡住了：可能有个钥匙串授权弹窗在等确认")
+	}
+	return false
 }
 
 // RequestRealtimeSync 是采集后的防抖触发：1.2 秒内多次复制只跑一轮。
@@ -1496,13 +1508,22 @@ func (a *App) RequestRealtimeSync() {
 // 被当成「正在跑」静默跳过——表现就是同步再也没动静，日志里也什么都没有。
 const SyncStuckAfter = 2 * time.Minute
 
+// SyncHardStuckAfter 是「彻底卡死」的门槛：到这一步才放弃这一轮、允许重开。
+//
+// 两分钟的阈值只负责告警（并停止再叠加新轮次）；十分钟还没回来就认为它不会回来了
+// （zombie），强制放开一次，接受可能的重入（库串行、推送幂等，代价可控）。
+const SyncHardStuckAfter = 10 * time.Minute
+
 func (a *App) runSync(loud bool) {
 	if !a.syncBusy.CompareAndSwap(false, true) {
 		a.syncPending.Store(true)
 		return
 	}
 	a.syncStartedAt.Store(time.Now().UnixNano())
+	a.syncAlive.Store(true)
 	defer func() {
+		a.syncAlive.Store(false)
+		a.syncStuckLogged.Store(false)
 		a.syncStartedAt.Store(0)
 		a.syncBusy.Store(false)
 		if a.syncPending.Swap(false) {
@@ -1586,12 +1607,18 @@ func (a *App) StartAutoSync() {
 		ticker := time.NewTicker(period)
 		defer ticker.Stop()
 		for range ticker.C {
-			a.CheckSyncStuck() // 上一轮卡死（比如在等钥匙串授权）就放开，别永久静默
-			if clipsync.LoadConfig(a.Paths).Enabled {
-				// 必须另起 goroutine：这一轮如果卡在钥匙串弹窗上，
-				// 直接在这里同步调用会把 ticker 循环本身堵死，看门狗跟着一起停摆。
-				go a.runSync(false)
+			hard := a.CheckSyncStuck()
+			if !clipsync.LoadConfig(a.Paths).Enabled {
+				continue
 			}
+			// 还有一轮真没返回（哪怕被判卡住）就别再叠加：攒着的话，钥匙串弹窗
+			// 一被允许，所有停着的轮次会同时醒来一起推同一个包。
+			if a.syncAlive.Load() && !hard {
+				continue
+			}
+			// 必须另起 goroutine：这一轮如果卡在钥匙串弹窗上，
+			// 直接在这里同步调用会把 ticker 循环本身堵死，看门狗跟着一起停摆。
+			go a.runSync(false)
 		}
 	}()
 }

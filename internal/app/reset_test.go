@@ -94,32 +94,42 @@ func TestPauseStopsCapture(t *testing.T) {
 	}
 }
 
-// TestSyncStuckWatchdogReleasesBusy 同步卡住（例如钥匙串弹窗没人点）超过阈值后要放开，
-// 否则 syncBusy 一直是 true，后面每一轮都被静默跳过，同步再也不动。
-func TestSyncStuckWatchdogReleasesBusy(t *testing.T) {
+// TestSyncStuckWatchdog 卡住的两级处理：
+// 两分钟只告警（且不再叠加新轮次），十分钟才强制放开重开。
+func TestSyncStuckWatchdog(t *testing.T) {
 	a := newTestApp(t)
 	if a.CheckSyncStuck() {
 		t.Fatal("没在跑的时候不该判定卡住")
 	}
 
 	a.syncBusy.Store(true)
+	a.syncAlive.Store(true)
 	a.syncStartedAt.Store(time.Now().UnixNano())
 	if a.CheckSyncStuck() {
 		t.Fatal("刚开始跑的这轮不算卡住")
 	}
 
-	// 把它「往前拨」到阈值之外
-	a.syncStartedAt.Store(time.Now().Add(-2 * SyncStuckAfter).UnixNano())
-	if !a.CheckSyncStuck() {
-		t.Fatal("超过阈值应当判定卡住并重置")
+	// 越过软阈值：告警但不放开（让调用方停止叠加新轮次）
+	a.syncStartedAt.Store(time.Now().Add(-SyncStuckAfter - time.Second).UnixNano())
+	if a.CheckSyncStuck() {
+		t.Fatal("软阈值不该判定为彻底卡死")
 	}
-	if a.syncBusy.Load() {
-		t.Fatal("重置后 syncBusy 应当放开")
-	}
-	if a.syncStartedAt.Load() != 0 {
-		t.Fatal("重置后起始时间应当清零")
+	if !a.syncBusy.Load() || !a.syncAlive.Load() {
+		t.Fatal("软阈值不该放开 busy/alive：卡住的那轮还在，攒着只会一起醒来")
 	}
 	if s := a.Status(); s == "" {
-		t.Fatal("应当在底栏给一句提示")
+		t.Fatal("软阈值应当在底栏给一句提示")
+	}
+	if !a.syncStuckLogged.Load() {
+		t.Fatal("软阈值应当记下「已经告过一次」，避免每 5 秒刷屏")
+	}
+
+	// 越过硬阈值：放开并允许重开
+	a.syncStartedAt.Store(time.Now().Add(-SyncHardStuckAfter - time.Second).UnixNano())
+	if !a.CheckSyncStuck() {
+		t.Fatal("超过硬阈值应当判定彻底卡死并允许重开")
+	}
+	if a.syncBusy.Load() {
+		t.Fatal("硬阈值后 syncBusy 应当放开")
 	}
 }
