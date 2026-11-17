@@ -57,7 +57,8 @@ docs/                       路线图、执行计划、验证记录
 ## 安装
 
 ```bash
-brew tap nekoleamo/clipnest && brew install --cask clipnest          # macOS（Homebrew）
+# macOS（Homebrew）：新版 Homebrew 要求显式信任第三方 tap
+brew tap nekoleamo/clipnest && brew trust --tap nekoleamo/clipnest && brew install --cask clipnest
 curl -fsSL https://raw.githubusercontent.com/nekoleamo/clipnest/main/install.sh | sh   # macOS（一把梭）
 scoop bucket add clipnest https://github.com/nekoleamo/scoop-clipnest && scoop install clipnest   # Windows
 irm https://raw.githubusercontent.com/nekoleamo/clipnest/main/install.ps1 | iex        # Windows（一把梭）
@@ -66,7 +67,8 @@ irm https://raw.githubusercontent.com/nekoleamo/clipnest/main/install.ps1 | iex 
 国内网络把域名换成 Gitee 镜像（下载走哪边脚本会自动挑，连不上 GitHub 就换 Gitee）：
 
 ```bash
-brew tap null_593_5354/clipnest https://gitee.com/null_593_5354/homebrew-clipnest   # cask 也从 Gitee 拉包
+brew tap null_593_5354/clipnest https://gitee.com/null_593_5354/homebrew-clipnest && \
+  brew trust --tap null_593_5354/clipnest && brew install --cask clipnest   # cask 也从 Gitee 拉包
 curl -fsSL https://gitee.com/null_593_5354/clipnest/raw/main/install.sh | sh
 scoop bucket add clipnest https://gitee.com/null_593_5354/scoop-clipnest
 irm https://gitee.com/null_593_5354/clipnest/raw/main/install.ps1 | iex
