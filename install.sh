@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# ⚠️ 本文件由 tools/install.sh 生成（tools/release-go.sh 每次发版重写），不要手改。
-#    要改逻辑去改 tools/install.sh。
 # clipnest 一键安装（macOS）：下载 → 校验 SHA256 → 装进 /Applications（或 ~/Applications）。
 #
 # 用法：

@@ -27,6 +27,11 @@ PLATFORMS="${PLATFORMS:-darwin/universal,windows/amd64}"
 
 echo "== 版本 ${VERSION}（${OWNER}/${REPO}）平台 ${PLATFORMS}"
 
+# SKIP_BUILD=1：产物已经编好了（比如签名时时间戳服务抽风，重跑一次又好了），
+# 只重做归档/校验和/cask/manifest，别把 20 多秒的编译和签名再来一遍。
+if [ "${SKIP_BUILD:-}" = "1" ]; then
+  echo "== 跳过测试与打包（SKIP_BUILD=1，复用 $OUT 里已有产物）"
+else
 echo "== 测试与静态检查"
 go test ./...
 go vet ./...
@@ -35,6 +40,7 @@ GOOS=linux go build ./...
 
 echo "== 打包（mygo build）"
 go tool mygo build -platform "$PLATFORMS" -skip-installer
+fi
 
 echo "== 归档"
 MAC_APP="$OUT/darwin-universal/clipnest.app"
@@ -46,7 +52,7 @@ if [ -f "$OUT/windows-amd64/clipnest.exe" ]; then
 fi
 
 echo "== 校验和"
-(cd "$OUT" && shasum -a 256 clipnest-"${VERSION}"-*.zip */*.dmg > SHA256SUMS)
+(cd "$OUT" && shasum -a 256 clipnest-"${VERSION}"-*.zip */*-"${VERSION}"*.dmg > SHA256SUMS)
 cat "$OUT/SHA256SUMS"
 
 echo "== 生成 cask 片段"
@@ -132,7 +138,7 @@ echo "   $OUT/clipnest.scoop.json   （放自建 bucket: bucket/clipnest.json）
 echo "   $OUT/install.sh / install.ps1（拷到仓库根目录，供一键安装用）"
 echo ""
 echo "对外可以宣传的安装方式："
-echo "  brew tap ${OWNER}/clipnest && brew install --cask clipnest"
+echo "  brew tap ${OWNER}/clipnest && brew trust --tap ${OWNER}/clipnest && brew install --cask clipnest"
 echo "  scoop bucket add clipnest https://github.com/${OWNER}/scoop-clipnest && scoop install clipnest"
 echo "  curl -fsSL https://raw.githubusercontent.com/${OWNER}/${REPO}/main/install.sh | sh"
 echo "  irm https://raw.githubusercontent.com/${OWNER}/${REPO}/main/install.ps1 | iex"

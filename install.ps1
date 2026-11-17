@@ -1,5 +1,3 @@
-# ⚠️ 本文件由 tools/install.ps1 生成（tools/release-go.sh 每次发版重写），不要手改。
-#    要改逻辑去改 tools/install.ps1。
 # clipnest 一键安装（Windows）：下载 → 校验 SHA256 → 解到 %LOCALAPPDATA%\Programs\clipnest → 建开始菜单快捷方式。
 #
 # 用法（PowerShell）：

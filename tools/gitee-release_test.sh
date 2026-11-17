@@ -54,7 +54,7 @@ class H(BaseHTTPRequestHandler):
             return self._json(200, {"login": "null_593_5354"})
         if path == "/api/v5/repos/null_593_5354/clipnest":
             return self._json(200, {"full_name": "null_593_5354/clipnest", "human_name": "nekoleamo/clipnest"})
-        if path.endswith("/releases/tags/v1.0.0"):
+        if "/releases/tags/" in path:
             if STATE["release"] is None:
                 return self._json(404, {"message": "Not Found"})
             return self._json(200, {"id": STATE["release"]})
@@ -121,8 +121,17 @@ export GITEE_API_BASE="http://127.0.0.1:$PORT/api/v5"
 export GITEE_ASSET_BASE="http://127.0.0.1:$PORT"
 export GITEE_TOKEN="good-token"
 
+# 自造一套极小的假产物：测试不该依赖「本机刚好构建过哪个版本」
+TAG="v9.9.9"
+VER="9.9.9"
+DIST="$WORK/dist"
+mkdir -p "$DIST"
+for f in "clipnest-$VER-macos.zip" "clipnest-$VER-windows-x86_64.zip" "clipnest-$VER-universal.dmg" "SHA256SUMS"; do
+  printf 'fake' >"$DIST/$f"
+done
+
 # 第一次跑：应建 release + 传 4 个附件
-OUT1="$(bash tools/gitee-release.sh v1.0.0 2>&1)"
+OUT1="$(bash tools/gitee-release.sh "$TAG" "$DIST" 2>&1)"
 echo "$OUT1" | grep -q "token 属于账号：null_593_5354" && ok "token 校验通过（打印账号名）" || bad "token 校验没打印账号：$(echo "$OUT1" | tail -2)"
 echo "$OUT1" | grep -q "已建 release id=42" && ok "建 release" || bad "没建成 release"
 UPLOADED="$(echo "$OUT1" | grep -c "· 上传.*ok")"
@@ -130,13 +139,13 @@ UPLOADED="$(echo "$OUT1" | grep -c "· 上传.*ok")"
 echo "$OUT1" | grep -q "可匿名下载" && ok "匿名回查通过" || bad "匿名回查没跑"
 
 # 第二次跑：release 与附件都已在，应「复用 + 跳过」
-OUT2="$(bash tools/gitee-release.sh v1.0.0 2>&1)"
+OUT2="$(bash tools/gitee-release.sh "$TAG" "$DIST" 2>&1)"
 echo "$OUT2" | grep -q "复用已有 release id=42" && ok "第二次复用已有 release" || bad "没有复用 release"
 SKIPPED="$(echo "$OUT2" | grep -c "已存在，跳过")"
 [ "$SKIPPED" = "4" ] && ok "第二次 4 个附件都跳过" || bad "跳过逻辑不对（$SKIPPED 个）"
 
 # token 不对：应给出可读的失败原因，且不是 404 糊过去
-OUT3="$(GITEE_TOKEN=bad-token bash tools/gitee-release.sh v1.0.0 2>&1)"
+OUT3="$(GITEE_TOKEN=bad-token bash tools/gitee-release.sh "$TAG" "$DIST" 2>&1)"
 echo "$OUT3" | grep -q "token 无效或已过期" && ok "错 token 的提示说得清" || bad "错 token 的提示不明确：$(echo "$OUT3" | tail -2)"
 
 echo "--------"
