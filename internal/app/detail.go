@@ -13,8 +13,6 @@ import (
 	"clipnest/internal/model"
 )
 
-var _ = mygo.App
-
 // ShowDetail 打开（或重用）详情窗：图片按屏幕可用区缩放到最大 85%，长文本铺满窗口。
 func (a *App) ShowDetail(row Row) {
 	isImage := row.Kind == model.KindImage

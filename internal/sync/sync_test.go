@@ -25,9 +25,6 @@ func openDB(t *testing.T) *sqlDB {
 	return database
 }
 
-// noopThumb 不让同步测试依赖图片编码。
-func noopThumb(data []byte, to string) error { return nil }
-
 func tempPaths(t *testing.T, tag string) paths.Paths {
 	t.Helper()
 	p := paths.FromRoot(filepath.Join(t.TempDir(), tag))

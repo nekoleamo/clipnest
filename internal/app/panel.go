@@ -681,8 +681,8 @@ func (a *App) DeleteMarked(fallback Row, hasFallback bool) int {
 	return len(snaps)
 }
 
-// UndoAfter 是撤销删除的窗口。
-const UndoAfter = 10 * time.Second
+// UndoAfter 是撤销删除的窗口（变量而非常量：测试要把它调小）。
+var UndoAfter = 10 * time.Second
 
 // undoState 是最近一次删除的快照（只记最近一批）。
 type undoState struct {
@@ -695,26 +695,34 @@ type undoState struct {
 // setUndo 记下这次删除并安排「窗口过了回收图片文件」。
 func (a *App) setUndo(snaps []db.RowData, files []string) {
 	a.mu.Lock()
+	prevFiles := a.undo.files // 上一批的图片文件：只记最近一批，它的窗口到此结束
 	a.undoGen++
 	gen := a.undoGen
 	a.undo = undoState{snaps: snaps, files: files, at: time.Now(), gen: gen}
 	a.mu.Unlock()
+
+	// 上一批已经不可撤销，它的图片文件立刻回收
+	if len(prevFiles) > 0 {
+		a.Store.DeleteImageFiles(prevFiles)
+	}
+
 	// 窗口结束时重画一次：撤销按钮/状态文案要跟着消失
 	time.AfterFunc(UndoAfter, a.invalidate)
 	if len(files) == 0 {
 		return
 	}
+	// 每个批次只清理「自己那一批」的文件：否则连删两次时，先到的定时器会把
+	// 后一批还在窗口内的图片删掉（那一批就撤销不回来了）
+	own := files
 	time.AfterFunc(UndoAfter, func() {
 		a.mu.Lock()
-		stale := a.undo.gen != gen || time.Since(a.undo.at) >= UndoAfter
-		var files []string
-		if stale {
-			files = a.undo.files
+		mine := a.undo.gen == gen
+		if mine {
 			a.undo = undoState{}
 		}
 		a.mu.Unlock()
-		if len(files) > 0 {
-			a.Store.DeleteImageFiles(files) // 窗口过了没人撤销：真删
+		if mine {
+			a.Store.DeleteImageFiles(own) // 窗口过了没人撤销：真删
 		}
 	})
 }

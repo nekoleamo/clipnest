@@ -821,11 +821,6 @@ func emptyState(q string) (title, hint string) {
 	return "还没有历史记录", "复制文字、图片或文件，会自动收进这里"
 }
 
-// fitSize 按比例把图片塞进 maxW × maxH（等比，不裁切）。
-func fitSize(w, h int64, maxW, maxH float32) (float32, float32) {
-	return fitSizeUp(w, h, maxW, maxH, 1)
-}
-
 // fitSizeUp 同 fitSize，但允许放大到 maxUpscale 倍（小图按栏宽放大，不显得小）。
 func fitSizeUp(w, h int64, maxW, maxH, maxUpscale float32) (float32, float32) {
 	if w <= 0 || h <= 0 {

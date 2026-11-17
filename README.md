@@ -3,7 +3,7 @@
 macOS / Windows 剪贴板历史管理器。菜单栏（托盘）常驻，`⌘⇧V`（Windows `Ctrl+Shift+V`）唤出面板，回车粘贴。
 历史可通过**自有 NAS**（WebDAV）端到端加密同步，不依赖第三方云。
 
-纯 Go：UI 由 [mygo](https://github.com/egoist/mygo) v0.9.1 自绘，无 WebView、无 Node、无 cgo。
+纯 Go：UI 由 [mygo](https://github.com/egoist/mygo) v0.10.0 自绘，无 WebView、无 Node、无 cgo。
 
 ## 能做什么
 

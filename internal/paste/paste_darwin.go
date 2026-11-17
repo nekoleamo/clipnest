@@ -12,9 +12,8 @@ import (
 )
 
 var (
-	once     sync.Once
-	initErr  error
-	cgHandle uintptr
+	once    sync.Once
+	initErr error
 
 	axTrustedFn func() bool
 	cgSourceNew func(state uint32) uintptr
@@ -49,7 +48,6 @@ func init_() error {
 			initErr = err
 			return
 		}
-		cgHandle = cg
 		for _, item := range []struct {
 			fn   any
 			name string

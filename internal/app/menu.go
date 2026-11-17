@@ -7,12 +7,8 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// rowMenuBuilds 统计菜单构建次数（测试用）。
-var rowMenuBuilds int
-
 // rowMenu 是列表行的右键菜单，条目与面板快捷键一一对应。
 func (a *App) rowMenu(m *ui.Menu, row Row) {
-	rowMenuBuilds++
 	if m.Item("粘贴").Shortcut(0, ui.KeyEnter).Chosen() {
 		a.Paste(row)
 	}

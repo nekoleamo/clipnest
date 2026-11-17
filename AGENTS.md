@@ -6,7 +6,7 @@
 ## 技术栈（不要偏离）
 
 - **Go 1.27+**，模块名 `clipnest`，纯 Go **无 cgo**
-- **mygo v0.9.1**（锁定，升级单独一轮并复跑 `docs/` 验证项）
+- **mygo v0.10.0**（锁定；升级单独一轮并复跑 `docs/` 验证项——0.9.1 → 0.10.0 时 API 与行为均无变化，坑位仍适用）
 - UI 走 **mygo `ui` 包纯 Go 自绘**：不用 WebView、不用 TSX、不引入 Node
 - 存储 `modernc.org/sqlite`（FTS5 内置），同步 `net/http`（WebDAV），哈希 `blake3`
 - 需要框架没暴露的平台 API（前台应用身份、`CGEvent` 合成 ⌘V）用 `purego`，不引入 cgo

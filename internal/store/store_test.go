@@ -421,9 +421,8 @@ func TestPruneOlderThanAndClearAll(t *testing.T) {
 	}
 
 	// 把 cutoff 放到未来：除了受保护的那条，其余都该被删
-	future := model.Now()
 	time.Sleep(5 * time.Millisecond)
-	future = model.Now()
+	future := model.Now()
 	deleted, err := s.PruneOlderThan(future)
 	if err != nil {
 		t.Fatalf("按时间清理失败：%v", err)

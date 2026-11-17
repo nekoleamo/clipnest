@@ -94,7 +94,12 @@ func (a *App) prefsView(c *ui.Context) {
 			}
 		}
 		if backendKind == 1 && passphrase != "" {
-			_ = clipsync.SecretSet(clipsync.WebDavSecretService, nextCfg.DeviceName, passphrase)
+			// WebDAV 账号口令也存一份；存不进去要报出来，否则之后同步发请求时
+			// 只会得到一个「认证失败」，看不出是这一步没落盘
+			if err := clipsync.SecretSet(clipsync.WebDavSecretService, nextCfg.DeviceName, passphrase); err != nil {
+				logf("WEBDAV secret save failed: %v", err)
+				status = "⚠️ WebDAV 口令没写进" + clipsync.SecretStoreName() + "：" + err.Error()
+			}
 		}
 		a.Refresh()
 		if status == "" {
