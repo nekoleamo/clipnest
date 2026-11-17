@@ -54,6 +54,13 @@ docs/                       路线图、执行计划、验证记录
 | `AGENTS.md` | 项目约定 + mygo 已确认的坑 |
 | `docs/nsh-时代的历史坑.md` | nsh 0.5.1 与 Rust 时代的全部实测坑（历史参考） |
 
+## 许可
+
+MIT，见 `LICENSE`（`Copyright (c) 2026 丁盛 (nekoleamo)`）。
+
+二进制里链接的第三方代码各自保留原许可证（MIT / BSD-3 / Apache-2.0 等），全文见
+`THIRD-PARTY-LICENSES.md`；发版前用 `python3 tools/thirdparty.py` 重新生成，确保版权声明随分发一起保留。
+
 ## 相关
 
 - 上游参照实现：[EcoPaste](https://github.com/EcoPasteHub/EcoPaste)（Tauri 版 + 正在进行的 Go 重构）
