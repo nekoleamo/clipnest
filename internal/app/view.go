@@ -274,6 +274,11 @@ func (a *App) bindKeys(root ui.Element, c *ui.Context) {
 	root.OnShortcut(0, ui.KeyUp, func() { a.Move(-1) })
 	root.OnShortcut(0, ui.KeyRight, func() { a.Move(1) })
 	root.OnShortcut(0, ui.KeyLeft, func() { a.Move(-1) })
+	// Home/End 不绑：焦点几乎总在搜索框里，单行输入框会把这两个键当「光标到行首/行尾」吃掉，
+	// root 上的绑定永远收不到（实测过）。翻页用 PgUp/PgDn，它们能穿过输入框。
+	root.OnShortcut(0, ui.KeyPageUp, func() { a.MovePage(-1) })
+	root.OnShortcut(0, ui.KeyPageDown, func() { a.MovePage(1) })
+	root.OnShortcut(ui.Cmd, ui.KeyF, func() { a.FocusSearch() })
 
 	root.OnShortcut(ui.Cmd, ui.KeyD, rowAction(func(r Row) bool { return a.Remove(r) }))
 	root.OnShortcut(ui.Cmd, ui.KeyP, rowAction(func(r Row) bool { return a.ToggleFlag(r, FlagPinned) }))

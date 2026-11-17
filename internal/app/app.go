@@ -502,6 +502,15 @@ func (a *App) bindSearchInput(h *ui.Handle, c *ui.Context) {
 	a.mu.Unlock()
 }
 
+// FocusSearch 把焦点放到搜索框（⌘F 与「点过列表之后」都走它）。
+func (a *App) FocusSearch() {
+	a.mu.Lock()
+	a.focusSearchNext = true
+	a.mu.Unlock()
+	a.refocusSearch()
+	a.invalidate()
+}
+
 // refocusSearch 把键盘焦点还给搜索框（点过列表之后调用）。
 func (a *App) refocusSearch() {
 	if a.searchCtx == nil {
@@ -533,6 +542,54 @@ func (a *App) takeFocusSearchNext() bool {
 	want := a.focusSearchNext
 	a.focusSearchNext = false
 	return want
+}
+
+// MoveTo 直接跳到第 index 行（Home/End 用）。
+//
+// 跳过去之后同样要把选中行滚进可视区，否则跳到末尾看不见。
+func (a *App) MoveTo(index int) {
+	a.mu.Lock()
+	n := len(a.rows)
+	switch {
+	case n == 0:
+		a.sel = 0
+	case index < 0:
+		a.sel = 0
+	case index >= n:
+		a.sel = n - 1
+	default:
+		a.sel = index
+	}
+	a.mu.Unlock()
+	a.requestScrollToSelection()
+	a.invalidate()
+}
+
+// PageStep 是一屏能放几行：按列表可视区高度与实测行高估，至少 1 行。
+func (a *App) PageStep() int {
+	a.mu.Lock()
+	view := a.listViewH
+	a.mu.Unlock()
+	const rowH = 30 // 行高不固定（图片行更高），取个偏小的估计，翻页不会跳过头
+	if view <= 0 {
+		return 5
+	}
+	if n := int(view / rowH); n > 1 {
+		return n
+	}
+	return 5
+}
+
+// MovePage 翻页（delta 为 ±1）。
+func (a *App) MovePage(delta int) {
+	step := a.PageStep()
+	a.mu.Lock()
+	sel, n := a.sel, len(a.rows)
+	a.mu.Unlock()
+	a.MoveTo(sel + delta*step)
+	if delta > 0 && sel+step >= n && a.HasMore() {
+		a.LoadMore() // 翻到底部先补一页，别让 End/PgDn 卡在已加载的尽头
+	}
 }
 
 // Move 上下移动选中（delta 为 ±1）。

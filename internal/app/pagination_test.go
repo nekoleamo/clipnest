@@ -113,3 +113,50 @@ func TestQueryResetsPage(t *testing.T) {
 		t.Fatalf("唤出后应当回到第一页 %d 条，实际 %d", PageSize, got)
 	}
 }
+
+// TestPagingKeys PgUp/PgDn 按视口翻页、翻到底会补页；MoveTo 能跳到首尾。
+//
+// Home/End 没绑：搜索框是单行输入框，会把这两个键当「光标到行首/行尾」吃掉。
+func TestPagingKeys(t *testing.T) {
+	a := newTestApp(t)
+	seedMany(t, a, PageSize+10)
+
+	tester := ui.NewTester(a.PanelView, 720, 560)
+	tester.Frame()
+	tester.Frame()
+	a.MoveTo(3)
+	tester.Frame()
+
+	// 代码里的 MoveTo 就是「跳到第 n 条」的能力（Home/End 收不到，换入口也走它）
+	a.MoveTo(PageSize - 1)
+	tester.Frame()
+	if sel, _ := a.Selection(); sel != PageSize-1 {
+		t.Fatalf("MoveTo 应当跳到已加载的最后一条 %d，实际 %d", PageSize-1, sel)
+	}
+	a.MoveTo(-5)
+	tester.Frame()
+	if sel, _ := a.Selection(); sel != 0 {
+		t.Fatalf("MoveTo 负数应当夹到 0，实际 %d", sel)
+	}
+
+	step := a.PageStep()
+	tester.KeyDown(ui.KeyPageDown)
+	tester.Frame()
+	if sel, _ := a.Selection(); sel != step {
+		t.Fatalf("PgDn 应当走一屏 %d，实际 %d", step, sel)
+	}
+	tester.KeyDown(ui.KeyPageUp)
+	tester.Frame()
+	if sel, _ := a.Selection(); sel != 0 {
+		t.Fatalf("PgUp 应当退回 0，实际 %d", sel)
+	}
+
+	// 从已加载的末尾再按 PgDn：先补下一页，不卡住
+	a.MoveTo(PageSize - 1)
+	tester.Frame()
+	tester.KeyDown(ui.KeyPageDown)
+	tester.Frame()
+	if !a.HasMore() && len(a.Rows()) != PageSize+10 {
+		t.Fatalf("翻到底应当补上下一页，实际已加载 %d", len(a.Rows()))
+	}
+}
