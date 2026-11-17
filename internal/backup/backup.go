@@ -8,7 +8,7 @@
 //	  - 明文是 JSON（Payload：版本 + 全部 items/groups）
 //	  - AAD 绑定 magic，格式头被改过会解密失败
 //
-// 旧实现（legacy-rust/src/backup.rs）的字节布局在这里原样保留（契约 11）：
+// 旧实现（src/backup.rs，已从仓库删除）的字节布局在这里原样保留（契约 11）：
 // 用旧版导出的 .cnbak 必须能被新版打开。
 package backup
 

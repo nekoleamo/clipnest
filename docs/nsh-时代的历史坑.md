@@ -1,25 +1,13 @@
-# clipnest 项目约定
+# nsh 时代的历史坑（归档）
 
-> 新会话先读：`docs/路线图.md`（总纲）→ `docs/执行计划-下一步.md`（从哪继续）→ 本文（约定与坑）。
-
-## 技术栈（不要偏离）
-
-- **Rust + nsh 0.5.1**，UI 用 Rust 组件（`nsh_core` / `nsh_base`），不用 TSX
-- 不引入 WebView、Node、Electron 类依赖
-- `nsh` 版本锁在 0.5.1，升级单独做一次并复跑 `docs/` 里的验证项
-
-## 构建
-
-```bash
-source "$HOME/.cargo/env"   # rustup（cargo 在 ~/.cargo/bin；/opt/homebrew/bin/cargo 已不存在）
-cargo check
-nsh package --target macos
-nsh test
-
-# Windows：交叉编译与打包（macOS 上可跑，真机冒烟另算）
-cargo xwin check --target x86_64-pc-windows-msvc --all-targets
-nsh package --target windows
-```
+> ⚠️ **这不是现行约定**。这是 nsh 0.5.1 + Rust 时代的 `AGENTS.md`，2026-11-16 迁到 Go + mygo
+> 之后归档在此；2026-11-17 连 `legacy-rust/` 代码一起从仓库删除，只留这份文档。
+>
+> **什么时候翻它**：只在追溯「为什么现在这么实现」时——比如某些行为契约、字节布局、
+> 打包/签名上的坑，都是那个时代踩出来的。**现行约定看仓库根目录的 `AGENTS.md`。**
+>
+> 下面「技术栈」「构建」「发布」这些章节里的 `cargo`/`nsh package` 命令**全部作废**
+> （Go 版用 `go build` / `go tool mygo build`），保留原文只为对照当时的记录。
 
 ## nsh 0.5.1 已确认的坑（每条都实测过）
 

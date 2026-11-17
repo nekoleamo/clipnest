@@ -1,5 +1,0 @@
-[toolchain]
-channel = "stable"
-components = ["clippy", "rustfmt"]
-# 交叉编译 Windows 时用到的 std（目标需 `rustup target add` 过）：
-targets = ["x86_64-pc-windows-msvc"]

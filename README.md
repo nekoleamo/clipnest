@@ -8,7 +8,7 @@
 
 ## 当前状态
 
-**已迁到 Go + mygo**：nsh + Rust 实现归档在 `legacy-rust/`（只作对照，不再构建）。Go 版主链路跑通：数据层、采集、面板、托盘/快捷键、粘贴注入、加密备份、WebDAV 增量同步、单实例、打包。
+**已迁到 Go + mygo**：nsh + Rust 旧实现已删除（2026-11-17），只留 `docs/nsh-时代的历史坑.md` 备追溯。Go 版主链路跑通：数据层、采集、面板、托盘/快捷键、粘贴注入、加密备份、WebDAV 增量同步、单实例、打包。
 
 | 能力 | nsh 版 | Go 版 |
 | --- | --- | --- |
@@ -42,7 +42,6 @@ go tool mygo build             # 打包（bundle / dmg / Windows 安装包）
 main.go / internal/ / ui/   Go 实现（见 AGENTS.md 的目录规划）
 tools/                      验证用辅助工具（Swift / PowerShell，非产品代码）
 docs/                       路线图、执行计划、验证记录
-legacy-rust/                已归档的 nsh + Rust 实现，仅作对照，不构建
 ```
 
 ## 文档
@@ -53,7 +52,7 @@ legacy-rust/                已归档的 nsh + Rust 实现，仅作对照，不�
 | `docs/执行计划-下一步.md` | **开工用**：当前交接状态与任务分解 |
 | `docs/2026-11-15-nsh-验证记录.md` | nsh 时代 P0 实测数据（Go 版验收时的行为基准） |
 | `AGENTS.md` | 项目约定 + mygo 已确认的坑 |
-| `legacy-rust/AGENTS-历史坑.md` | nsh 0.5.1 与 Rust 数据层的全部实测坑（归档参考） |
+| `docs/nsh-时代的历史坑.md` | nsh 0.5.1 与 Rust 时代的全部实测坑（历史参考） |
 
 ## 相关
 

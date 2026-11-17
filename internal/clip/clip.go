@@ -1,6 +1,6 @@
 // Package clip 是剪贴板采集层：读一次快照、翻译成入库内容、自身写回抑制。
 //
-// 与旧 Rust 实现（legacy-rust/src/clipboard.rs）的对应：
+// 与旧 Rust 实现（src/clipboard.rs，已从仓库删除）的对应：
 //   - 轮询 changeCount 换成 mygo 的 Clipboard.OnChanged（macOS 内部 250ms 轮询）；
 //   - flavor 判定换成 Formats()；
 //   - 回环抑制（契约 10）从「比对 changeCount」换成「比对内容哈希」——更可靠，

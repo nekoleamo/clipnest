@@ -1,7 +1,3 @@
-# Rust（已归档到 legacy-rust/，不再构建）
-legacy-rust/target
-**/*.rs.bk
-
 # Go
 /bin/
 /out/
