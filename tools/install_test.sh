@@ -125,6 +125,16 @@ else
   bad "--from gitee 直连失败：$(tail -3 "$WORK/run4.log" | tr '\n' ' ')"
 fi
 
+# ---------- 5) 管道风格：只用环境变量选源 ----------
+env CLIPNEST_NO_KILL=1 CLIPNEST_FROM=gitee CLIPNEST_REPO_GITEE="fake/repo" \
+  CLIPNEST_BASE_GITEE="http://127.0.0.1:$PORT_GH3" \
+  bash tools/install.sh --version v1.2.3 --dir "$WORK/apps5" --no-open >"$WORK/run5.log" 2>&1
+if [ $? -eq 0 ] && grep -q "下载源 gitee" "$WORK/run5.log"; then
+  ok "CLIPNEST_FROM=gitee 环境变量生效（管道执行时用）"
+else
+  bad "CLIPNEST_FROM 没生效：$(head -2 "$WORK/run5.log" | tr '\n' ' ')"
+fi
+
 echo "--------"
 echo "通过 $PASS 项，失败 $FAIL 项"
 [ "$FAIL" -eq 0 ]

@@ -27,9 +27,10 @@ GITEE_RAW="${CLIPNEST_RAW_GITEE:-https://gitee.com}"
 say() { printf '%s\n' "$*" >&2; }
 die() { printf '❌ %s\n' "$*" >&2; exit 1; }
 
-FROM="auto"
-VERSION=""
-TARGET_DIR="${CLIPNEST_INSTALL_DIR:-/Applications}"
+# 管道执行（curl … | sh）时传不了参数，就用环境变量；显式参数优先
+FROM="${CLIPNEST_FROM:-auto}"
+VERSION="${CLIPNEST_VERSION:-}"
+TARGET_DIR="${CLIPNEST_INSTALL_DIR:-${CLIPNEST_DIR:-/Applications}}"
 OPEN_AFTER=1
 
 while [ $# -gt 0 ]; do
