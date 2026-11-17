@@ -74,7 +74,9 @@ func (a *App) panelView(c *ui.Context) {
 			grip.DragWindow()
 		})
 		if !paste.Trusted() && !a.Settings.HideAccessibilityHint {
-			ui.Row(c).Fill().Gap(6).Children(func() {
+			// FillWidth 而不是 Fill：在 Column 里 Fill 会连高度一起吃掉，
+			// 把下面的搜索框/列表全顶到窗口外（测试里没 AX 授权就会踩到）
+			ui.Row(c).FillWidth().Gap(6).Children(func() {
 				ui.Text(c, "⚠️ 没有辅助功能授权，回车只复制不粘贴").
 					FontSize(11).TextColor(th.Warning).Grow(1)
 				grantBtn := ui.Button(c, "去授权")
@@ -141,6 +143,9 @@ func (a *App) searchField(c *ui.Context) ui.Element {
 		CaretColor(th.Text).
 		AutoFocus().
 		Bind(&a.searchInput)
+	if a.takeFocusSearchNext() {
+		in.Focus() // 刚唤出：焦点放回搜索框，可以直接打字
+	}
 	a.bindSearchInput(&a.searchInput, c)
 	if in.Changed() {
 		a.later(func() { a.SetQuery(q) })

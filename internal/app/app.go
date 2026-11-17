@@ -500,6 +500,15 @@ func (a *App) takeScrollToSelection() bool {
 	return want
 }
 
+// takeFocusSearchNext 取走一次性请求：面板刚唤出，把焦点放回搜索框。
+func (a *App) takeFocusSearchNext() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	want := a.focusSearchNext
+	a.focusSearchNext = false
+	return want
+}
+
 // Move 上下移动选中（delta 为 ±1）。
 func (a *App) Move(delta int) {
 	a.mu.Lock()
@@ -993,7 +1002,38 @@ func (a *App) TogglePanel() {
 	a.Show()
 }
 
-// Show 打开面板：记下前台应用、摆位置、显示。
+// ResetPanelState 把面板清回初始状态。
+//
+// 面板只是 Hide 不是销毁，所以搜索词、选中行、筛选、滚动位置、备注草稿这些
+// 都会跨「收起→再唤出」留着；不清的话再次呼出看到的就是上次退出时的样子。
+func (a *App) ResetPanelState() {
+	a.mu.Lock()
+	a.opens++
+	a.query = ""
+	a.sel = 0
+	a.visible = true
+	a.status = ""
+	a.syncMsg = ""
+	a.kindFilter = 0
+	a.groupFilter = ""
+	// 备注编辑器回到「没有正在编辑的条目」
+	a.noteFor = 0
+	a.noteDraft = ""
+	// 上一轮排在帧末尾的动作（点击/菜单回调）没跑完就不会跑了，
+	// 留着会在下一次渲染时冒出来（症状：刚唤出就选中/粘贴了一条）
+	a.pending = nil
+	a.scrollToSel = true
+	a.focusSearchNext = true
+	a.ListScroll = ui.ScrollState{}
+	win := a.imageWin
+	a.mu.Unlock()
+	// 收起时没关的放大预览窗，唤出前先关掉
+	if win != nil && win.IsVisible() {
+		win.Hide()
+	}
+}
+
+// Show 打开面板：把界面恢复成初始状态、记下前台应用、摆位置、显示。
 func (a *App) Show() {
 	w := a.panelWindow()
 	if w == nil {
@@ -1003,15 +1043,7 @@ func (a *App) Show() {
 	// 面板不激活 app，但仍要记住「刚才在哪个应用」以便粘贴后切回去。
 	paste.RememberForeground()
 
-	a.mu.Lock()
-	a.opens++
-	a.query = ""
-	a.sel = 0
-	a.visible = true
-	a.status = ""
-	a.syncMsg = ""
-	a.scrollToSel = true
-	a.mu.Unlock()
+	a.ResetPanelState()
 	a.Refresh()
 
 	// 位置：光标所在屏幕，居中或贴底（运行时就能算，不像 nsh 只能创建时定）

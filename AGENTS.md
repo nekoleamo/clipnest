@@ -67,6 +67,8 @@ docs/            路线图、执行计划、验证记录
 15. 打包：`go get -tool github.com/egoist/mygo/cmd/mygo` 后 `go tool mygo build`，配置在 `mygo.json`（native UI 项目不用 TS 配置）
 16. **中文输入法下 `TextInput.Submitted()` 需要第二次回车**：合成期间 AppKit 把 `KeyPressed` 扣住（mygo `surface.keyDown` 的 `withheld` 分支），只有 `KeyUp` 到达，第一次 ⏎ 只提交候选。不输入直接 ⏎ 一次就粘；`⌘1-9` 带 Cmd 不受输入法影响。另外 `OnWindowShortcut(0, ui.KeyEnter)` 永远不会触发——焦点在输入框时 Enter 被编辑框优先吃掉，要判提交就用 `Submitted()`
 17. 签名与 TCC：**已改用固定自签身份 `clipnest-dev`（`mygo.json` 的 `macos.signingIdentity`）**，实测重打包后辅助功能授权与钥匙串 ACL 都保持不变，不用再点。两个坑：①从 ad-hoc 换到证书时，TCC 里会残留一条匹配不上的旧记录（日志：`Failed to match existing code requirement`），面板就会永远提示去授权——`tccutil reset Accessibility com.clipnest.app` 后重新勾一次就好；②若换机器/丢了身份（`mygo build` 回退 ad-hoc cdhash），授权会每次重打包失效，跑 `tools/signing-identity.sh` 重建。排查入口：`<data>/clipnest.log` 里的 `SHOW ax=`、`go run ./cmd/syncprobe -probe`、`open -a clipnest.app --args -ax-prompt`
+18. **Column 里的子行要用 `FillWidth()` 而不是 `Fill()`**：`Fill()` 连高度一起占满，会把下面所有东西顶到窗口外（症状：整版偏下、搜索框跑到 400px 处、列表看不见）。辅助功能提示条就踩过这个坑——没授 AX 授权时整块版式崩掉，而且 `go test ./internal/app` 会随测试进程有没有 AX 授权时绿时红
+19. **面板只是 `Hide` 不是销毁，跨轮状态会留着**：搜索词、选中行、筛选、`ListScroll`、备注草稿、以及排进 `App.pending` 却没跑完的点击动作，都会在下次呼出时冒出来。`Show` 必须先走 `ResetPanelState()`（`internal/app/app.go`），否则「Esc 退出再呼出」看到的就是上次的样子
 
 ## 每轮收尾
 
