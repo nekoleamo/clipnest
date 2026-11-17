@@ -44,6 +44,10 @@ func (a *App) buildMenu() *mygo.Menu {
 	items = append(items,
 		&mygo.MenuItem{Label: "偏好设置…", Click: func(*mygo.MenuItem, *mygo.Window) { a.OpenPrefs() }},
 		&mygo.MenuItem{Label: "立即同步", Click: func(*mygo.MenuItem, *mygo.Window) { a.StartSync() }},
+		&mygo.MenuItem{Label: "检查更新", Click: func(*mygo.MenuItem, *mygo.Window) {
+			a.OpenPrefs()
+			a.CheckUpdate()
+		}},
 		&mygo.MenuItem{Type: mygo.MenuItemSeparator},
 		&mygo.MenuItem{Label: "退出 clipnest", Click: func(*mygo.MenuItem, *mygo.Window) { a.Quit() }},
 	)

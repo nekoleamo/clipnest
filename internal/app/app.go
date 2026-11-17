@@ -61,6 +61,11 @@ type App struct {
 	mu         sync.Mutex // 保护下面所有可变状态
 	captureMu  sync.Mutex // 序列化采集：OnChanged 可能并发投递，两个回调同时入库会撞唯一键
 	sincePrune int        // 上次裁剪之后又进了多少条（裁剪不必每条都跑）
+	// 检查更新的状态（releaseRepoDraft 是设置窗输入框草稿）
+	releaseRepoDraft string
+	updateMsg        string
+	updateURL        string
+	updateBusy       bool
 	// undo 是最近一次删除的快照与撤销窗口（图片文件在窗口内先不真删）
 	undo       undoState
 	undoGen    int
@@ -192,6 +197,17 @@ func (a *App) invalidate() {
 	a.mu.Lock()
 	ready := a.ready
 	w := a.panel
+	a.mu.Unlock()
+	if ready && w != nil {
+		w.Invalidate()
+	}
+}
+
+// invalidatePrefs 请求重画设置窗（可以从任何 goroutine 调）。
+func (a *App) invalidatePrefs() {
+	a.mu.Lock()
+	ready := a.ready
+	w := a.prefs
 	a.mu.Unlock()
 	if ready && w != nil {
 		w.Invalidate()

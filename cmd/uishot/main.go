@@ -29,6 +29,7 @@ func main() {
 	h := flag.Int("h", 560, "面板高度")
 	index := flag.Int("i", 0, "选中第几条（0 起）")
 	dark := flag.Bool("dark", true, "深色主题")
+	prefs := flag.Bool("prefs", false, "渲染设置窗而不是面板")
 	flag.Parse()
 
 	root, err := os.MkdirTemp("", "uishot-")
@@ -47,7 +48,11 @@ func main() {
 	a.Refresh()
 	a.Select(*index)
 
-	tester := ui.NewTester(a.PanelView, *w, *h)
+	view := a.PanelView
+	if *prefs {
+		view = a.PrefsView
+	}
+	tester := ui.NewTester(view, *w, *h)
 	tester.SetDark(*dark)
 	tester.Frame()
 	tester.Frame()
@@ -64,7 +69,11 @@ func main() {
 	if err := f.Close(); err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("已渲染 %s（%dx%d，选中第 %d 条）\n", *out, *w, *h, *index)
+	what := "面板"
+	if *prefs {
+		what = "设置窗"
+	}
+	fmt.Printf("已渲染 %s（%dx%d，%s，选中第 %d 条）\n", *out, *w, *h, what, *index)
 }
 
 // seed 造几条有代表性的条目：长文本、超高图、超宽图、小图、文件。

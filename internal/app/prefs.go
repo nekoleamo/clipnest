@@ -267,6 +267,30 @@ func (a *App) prefsView(c *ui.Context) {
 			})
 		})
 
+		ui.Divider(c)
+		ui.Text(c, "版本与更新").FontSize(14).Bold().TextColor(th.Text)
+		label(c, fmt.Sprintf("当前版本 %s · 只检查不自动装（未签名，装包要你自己点）", a.AppVersion()), th)
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.TextInput(c, a.UpdateRepoDraft()).Placeholder("更新源 owner/repo").Width(220)
+			if ui.Button(c, "保存更新源").Clicked() {
+				a.later(func() { a.SaveUpdateRepo(*a.UpdateRepoDraft()) })
+			}
+			if a.UpdateChecking() {
+				ui.Text(c, "检查中…").FontSize(11).TextColor(th.TextMuted)
+			} else if ui.Button(c, "检查更新").Clicked() {
+				a.later(a.CheckUpdate)
+			}
+			msg, hasURL := a.UpdateStatus()
+			if hasURL {
+				if ui.Button(c, "打开发布页").Clicked() {
+					a.later(a.OpenReleasePage)
+				}
+			}
+			if msg != "" {
+				ui.Text(c, msg).FontSize(11).TextColor(th.TextMuted)
+			}
+		})
+
 		ui.Row(c).Gap(8).Children(func() {
 			if ui.PrimaryButton(c, "保存").Clicked() {
 				apply()
