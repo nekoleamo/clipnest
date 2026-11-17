@@ -132,6 +132,8 @@ type App struct {
 	lastSyncVia string
 	// opens 是打开次数，面板据此判断「又开了一次」要不要重置查询。
 	opens int
+	// paused 为 true 时不再采集（托盘里手动暂停；只在内存里，重启恢复采集）
+	paused bool
 }
 
 // New 建好应用（不启动窗口）。
@@ -1193,6 +1195,9 @@ func (a *App) Capture() {
 	a.captureMu.Lock()
 	defer a.captureMu.Unlock()
 
+	if a.Paused() {
+		return // 手动暂停：连读剪贴板都省了
+	}
 	cap, snap, ok := clip.Capture(clip.MygoSource{})
 	if !ok {
 		return
@@ -1233,6 +1238,34 @@ func (a *App) Capture() {
 	a.Prune()
 	a.Refresh()
 	a.RequestRealtimeSync() // 实时模式：1.2 秒后把这条推到远端
+}
+
+// Paused 报告是否暂停采集。
+func (a *App) Paused() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.paused
+}
+
+// TogglePause 暂停/恢复采集；暂停期间复制的东西不会进历史。
+//
+// 只存在内存里：重启后自动恢复采集，免得忘了恢复、以为程序坏了。
+func (a *App) TogglePause() {
+	a.mu.Lock()
+	a.paused = !a.paused
+	paused := a.paused
+	tray := a.tray
+	a.mu.Unlock()
+	logf("CAPTURE paused=%v", paused)
+	if paused {
+		a.SetStatus("⏸ 已暂停记录，恢复请点菜单栏图标")
+	} else {
+		a.SetStatus("▶ 已恢复记录")
+		a.RequestRealtimeSync()
+	}
+	if tray != nil {
+		tray.SetMenu(a.buildMenu())
+	}
 }
 
 // Prune 按设置裁剪历史（收藏与置顶受保护）。

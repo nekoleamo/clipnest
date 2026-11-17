@@ -66,3 +66,29 @@ func TestResetPanelStateClearsPreviousSession(t *testing.T) {
 		t.Fatalf("渲染后选中被改回：%d", sel)
 	}
 }
+
+// TestPauseStopsCapture 暂停后不再采集，恢复后恢复；状态只存内存（重启即恢复）。
+func TestPauseStopsCapture(t *testing.T) {
+	a := newTestApp(t)
+	if a.Paused() {
+		t.Fatal("新起的应用不该是暂停状态")
+	}
+
+	a.TogglePause()
+	if !a.Paused() {
+		t.Fatal("TogglePause 之后应当是暂停")
+	}
+	before := len(a.Rows())
+	a.Capture() // 暂停期间即使剪贴板有内容也不该入库
+	if got := len(a.Rows()); got != before {
+		t.Fatalf("暂停期间不该新增条目：%d → %d", before, got)
+	}
+	if s := a.Status(); s == "" {
+		t.Fatal("暂停应当给一句底栏提示")
+	}
+
+	a.TogglePause()
+	if a.Paused() {
+		t.Fatal("再 TogglePause 应当恢复")
+	}
+}

@@ -119,6 +119,9 @@ func (a *App) panelView(c *ui.Context) {
 		if total > 0 {
 			footer = fmt.Sprintf("%d/%d · %s", min(sel, total-1)+1, total, hints)
 		}
+		if a.Paused() {
+			footer = "⏸ 已暂停记录 · " + footer
+		}
 		if status := a.Status(); status != "" {
 			footer = status + " · " + footer
 		}

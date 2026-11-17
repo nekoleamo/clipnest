@@ -26,6 +26,8 @@ func (a *App) AttachTray(icon []byte) (*mygo.Tray, error) {
 func (a *App) buildMenu() *mygo.Menu {
 	return mygo.NewMenu([]*mygo.MenuItem{
 		{Label: "显示面板  " + a.Hotkey(), Click: func(*mygo.MenuItem, *mygo.Window) { a.TogglePanel() }},
+		{Label: "暂停记录", Type: mygo.MenuItemCheckbox, Checked: a.Paused(),
+			Click: func(*mygo.MenuItem, *mygo.Window) { a.TogglePause() }},
 		{Type: mygo.MenuItemSeparator},
 		{Label: "辅助功能授权…", Click: func(*mygo.MenuItem, *mygo.Window) { a.RequestAccessibility() }},
 		{Label: "显示授权提示", Click: func(*mygo.MenuItem, *mygo.Window) { a.ShowAXHint() }},
