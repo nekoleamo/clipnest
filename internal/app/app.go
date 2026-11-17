@@ -43,96 +43,101 @@ type Row struct {
 }
 
 // App 是进程内的应用状态。
+//
+// 锁的约定：a.mu 保护下面所有 *可变* 状态（标注 atomic 的除外），
+// 拿到锁再碰字段；原子字段（sync*）可以从任何 goroutine 读写。
+// 采集回调、菜单回调、视图构建都跑在主线程，同步轮跑在自己的 goroutine 里，
+// 所以「主线程 + mu 保护」这两条就够，不需要给每个子系统单独配锁。
 type App struct {
+	// —— 地基：数据根、库、设置、回环抑制 ——
 	Paths    paths.Paths
 	Store    *store.Store
-	Settings settings.Settings
+	Settings settings.Settings // 写入在 mu 下（ApplyShortcut 等），读取基本都在主线程
 	Guard    *clip.Guard
 
-	mu    sync.Mutex
-	panel *mygo.Window
-	prefs *mygo.Window
-	tray  *mygo.Tray
-	rows  []Row
-	sel   int
-	query string
-	// limit 是列表当前取到第几页（每次+PageSize）；hasMore 表示库里还有更多；
-	// total 是当前查询条件下的总条数（顶栏「共 N 条」用它，不是已加载数）
-	limit   int
-	hasMore bool
-	total   int64
-	status  string
-	syncMsg string
-	visible bool
-	// ready 在窗口都建好、App.Run 即将开始时置位：之前调 Invalidate 会等主线程而死锁。
-	ready bool
-	// captureMu 序列化采集（OnChanged 可能并发投递，两个回调同时入库会撞唯一键）
-	captureMu sync.Mutex
-	// syncBusy/syncPending 保证同一时刻只跑一轮同步，期间的请求结束后补跑
-	syncBusy    atomic.Bool
-	syncPending atomic.Bool
-	// syncStartedAt 是当前这轮开始的时刻（UnixNano，0 = 没在跑），卡住时靠它发现
-	syncStartedAt atomic.Int64
-	// syncAlive 表示真的还有一轮没返回（只有它返回时才清）。syncBusy 是「逻辑上在跑」，
-	// 卡住时会被强制放开，但不能因此再起一轮：否则钥匙串弹窗点掉的那一下，
-	// 之前每次强放攒下的 goroutine 会同时醒来，一起推同一个包（实测一次冒 7 轮）。
-	syncAlive atomic.Bool
-	// syncStuckLogged 让「卡住」只记一次，不要每 5 秒刷屏
-	syncStuckLogged atomic.Bool
-	// debounce 是实时模式下的采集防抖定时器
-	debounceMu sync.Mutex
-	debounce   *time.Timer
-	// axPrompted 记录辅助功能提示是否已弹过
-	axPrompted atomic.Bool
-	// imageRect 是右栏图片区域的位置（测试与点击放大用）
-	imageRect ui.Rect
-	// previewCard 是右栏卡片的区域
-	previewCard ui.Rect
-	// probe 是测试用的观察口：这些动作会碰真剪贴板/真窗口，测试里换成断言。
-	probe probes
-	// imageWin/imageRow 是「点预览图放大看」的独立窗口
-	imageWin *mygo.Window
-	imageRow Row
-	// pending 是本帧要延后执行的动作（改动数据、发命令），由 runPending 统一跑
-	pending []func()
-	// searchInput 是搜索框的句柄：点过列表后把焦点还给它，
-	// 这样方向键仍然走面板快捷键，而不会被滚动容器吃掉
-	searchInput ui.Handle
+	// —— 并发原语 ——
+	mu         sync.Mutex // 保护下面所有可变状态
+	captureMu  sync.Mutex // 序列化采集：OnChanged 可能并发投递，两个回调同时入库会撞唯一键
+	debounceMu sync.Mutex // 保护 debounce
+
+	// —— 窗口与视图句柄 ——
+	panel       *mygo.Window
+	prefs       *mygo.Window
+	tray        *mygo.Tray
+	imageWin    *mygo.Window // 「点预览图放大看」的独立窗口
+	imageRow    Row          // 大图窗正在显示的那条
+	ready       bool         // 窗口都建好了：之前调 Invalidate 会等主线程而死锁
+	visible     bool
+	searchInput ui.Handle // 搜索框句柄：点过列表后把焦点还给它，方向键才不被滚动容器吃掉
 	searchCtx   *ui.Context
-	// focusSearchNext 让下一次渲染把焦点放回搜索框
-	focusSearchNext bool
-	// scrollToSel 是一次性的「把选中行滚进可视区」请求（键盘移动时置位）
-	scrollToSel bool
+	imageRect   ui.Rect // 右栏图片区域（测试与点击放大用）
+	previewCard ui.Rect // 右栏卡片区域
+	probe       probes  // 测试观察口，生产路径全 nil
+
+	// —— 列表与分页 ——
+	rows    []Row
+	sel     int
+	query   string
+	limit   int   // 列表当前取到第几页（每次 +PageSize）
+	hasMore bool  // 库里还有没有下一页（Refresh 多取一条判断）
+	total   int64 // 当前查询条件的总条数（顶栏「共 N 条」，不是已加载数）
 	// ListScroll 是列表的滚动位置（视图里 TrackScroll 绑定它）
 	ListScroll ui.ScrollState
-	// listViewH 是列表可视区高度（每帧量），供滚动计算用
-	listViewH float32
-	// previewH 是右栏卡片的高度（每帧量），供图片/正文的高度预算用
-	previewH float32
-	// 设置窗里的跨帧草稿与状态
-	shortcutDraft string
-	shortcutMsg   string
-	pruneDays     float64
-	clearConfirm  bool
+	listViewH  float32 // 列表可视区高度（每帧量），供滚动计算
+	previewH   float32 // 右栏卡片高度（每帧量），供图片/正文的高度预算
+	// scrollToSel 是一次性的「把选中行滚进可视区」请求（键盘移动时置位）
+	scrollToSel bool
+	// focusSearchNext 让下一次渲染把焦点放回搜索框
+	focusSearchNext bool
+	// pending 是本帧要延后执行的动作（改动数据、发命令），由 runPending 统一跑
+	pending []func()
+
+	// —— 筛选、分组、多选、备注 ——
 	// kindFilter 是顶部筛选：0 全部 / 1 收藏 / 2 置顶 / 3 图片 / 4 文件
 	kindFilter int
 	// groupFilter 是分组筛选："" 全部、"\x00" 未分组、其它为分组名
 	groupFilter string
-	// groups 是分组缓存（每次 Refresh 一起刷新）
-	groups []db.Group
+	groups      []db.Group // 分组缓存（每次 Refresh 一起刷新）
+	// marked 是批量操作勾上的条目 id（⌘/Ctrl 点击切换）；刷新列表不丢，删完/唤出清空
+	marked map[int64]bool
 	// noteDraft/noteFor 是备注编辑器的草稿与它属于哪一条
 	noteDraft string
 	noteFor   int64
-	// 设置窗里分组管理的草稿（跨帧保留，否则一个字就丢）
+	// paused 为 true 时不再采集（托盘里手动暂停；只在内存里，重启恢复）
+	paused bool
+	// status 是面板底栏那句提示；syncMsg 是同步写给底栏的（有就优先显示）
+	status  string
+	syncMsg string
+
+	// —— 设置窗的跨帧草稿 ——
+	shortcutDraft string
+	shortcutMsg   string
+	pruneDays     float64
+	clearConfirm  bool
+	// 分组管理的草稿（跨帧保留，否则一个字就丢）
 	newGroupDraft string
 	renameDrafts  map[int64]*string
+
+	// —— 同步（atomic 字段任何 goroutine 可读）——
+	syncBusy    atomic.Bool // 「逻辑上在跑」
+	syncPending atomic.Bool // 期间的请求，结束后补跑一次
+	// syncStartedAt 是当前这轮开始的时刻（UnixNano，0 = 没在跑），卡住时靠它发现
+	syncStartedAt atomic.Int64
+	// syncAlive 表示真的还有一轮没返回（只有它返回时才清）。syncBusy 卡住时会被强制放开，
+	// 但不能因此再起一轮：否则钥匙串弹窗点掉的那一下，之前每次强放攒下的 goroutine
+	// 会同时醒来，一起推同一个包（实测一次冒 7 轮）。
+	syncAlive atomic.Bool
+	// syncStuckLogged 让「卡住」只记一次，不要每 5 秒刷屏
+	syncStuckLogged atomic.Bool
+	// debounce 是实时模式下的采集防抖定时器
+	debounce *time.Timer
 	// lastSync/lastSyncVia 是最近一次成功的同步时间与入口
 	lastSync    string
 	lastSyncVia string
-	// paused 为 true 时不再采集（托盘里手动暂停；只在内存里，重启恢复采集）
-	paused bool
-	// marked 是批量操作勾上的条目 id（⌘/Ctrl 点击切换）；刷新列表不丢，删完/唤出清空
-	marked map[int64]bool
+
+	// —— 平台 ——
+	// axPrompted 记录辅助功能提示是否已弹过（只有 macOS 会用到）
+	axPrompted atomic.Bool
 }
 
 // probes 是测试观察口；生产路径上三个字段都是 nil（零成本）。
