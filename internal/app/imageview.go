@@ -26,8 +26,8 @@ func (a *App) ShowImage(row Row) {
 	win := a.imageWin
 	a.imageRow = row
 	a.mu.Unlock()
-	if a.zoomProbe != nil {
-		a.zoomProbe(row)
+	if a.probe.zoom != nil {
+		a.probe.zoom(row)
 	}
 	if win == nil {
 		// 没有窗口（测试环境或还没建好）：到此为止，别去碰 Screen（会等主线程）

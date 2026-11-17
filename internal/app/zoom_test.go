@@ -43,7 +43,7 @@ func TestClickPreviewImageOpensZoom(t *testing.T) {
 	}
 
 	var got Row
-	a.zoomProbe = func(r Row) { got = r }
+	a.probe.zoom = func(r Row) { got = r }
 
 	tester := ui.NewTester(a.PanelView, 720, 560)
 	tester.Frame()

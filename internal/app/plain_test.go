@@ -21,7 +21,7 @@ func TestPastePlainShortcutReachesPanel(t *testing.T) {
 	a.Refresh()
 
 	var probed int64
-	a.plainProbe = func(r Row) { probed = r.ID }
+	a.probe.plain = func(r Row) { probed = r.ID }
 
 	tester := ui.NewTester(a.PanelView, 720, 560)
 	tester.Frame()

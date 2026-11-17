@@ -42,7 +42,7 @@ func TestRowDragCarriesClipboardPayload(t *testing.T) {
 	record(t, a, "拖拽导出测试内容")
 
 	var got transfer.Data
-	a.dragProbe = func(d transfer.Data) { got = d }
+	a.probe.drag = func(d transfer.Data) { got = d }
 
 	tester := ui.NewTester(a.PanelView, 720, 560)
 	tester.Frame()
