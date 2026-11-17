@@ -99,6 +99,9 @@ func (a *App) currentFilterLocked() db.Filter {
 		f.Kinds = []model.ItemKind{model.KindImage}
 	case 4:
 		f.Kinds = []model.ItemKind{model.KindFiles}
+	case 5:
+		yes := true
+		f.Sensitive = &yes
 	}
 	switch {
 	case a.groupFilter == "":
@@ -167,6 +170,7 @@ func (a *App) rowOf(item model.Item) Row {
 		Tag:       TagOf(item.Kind),
 		Summary:   SummaryOf(item),
 		Time:      model.RelativeTime(item.UpdatedAt),
+		CreatedAt: model.DateTime(item.CreatedAt),
 		Width:     item.Width,
 		Height:    item.Height,
 		Pinned:    item.Pinned,

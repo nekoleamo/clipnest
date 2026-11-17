@@ -23,11 +23,13 @@ const PageSize = 200
 
 // Row 是面板里一行的预计算结果。
 type Row struct {
-	ID         int64
-	Kind       model.ItemKind
-	Tag        string
-	Summary    string
-	Time       string
+	ID      int64
+	Kind    model.ItemKind
+	Tag     string
+	Summary string
+	Time    string
+	// CreatedAt 是「首次入库」的时刻（预览里显示，列表用相对时间）
+	CreatedAt  string
 	ThumbPath  string
 	OriginPath string
 	Width      int64

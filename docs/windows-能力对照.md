@@ -28,6 +28,7 @@
 | 18 | 同步 | `internal/sync`：WebDAV（`net/http` 自定义 PROPFIND/MKCOL/PUT）+ 端到端加密；增量按 `updated_at`/`meta_at` 双时间戳 | 同一套（纯 Go HTTP；口令走 `mygo.Secrets` → Windows DPAPI） | 🔵 平台无关 |
 | 19 | 单实例 | `mygo.App.RequestSingleInstanceLock()` + `OnSecondInstance` 唤出面板 | 同一套（框架用命名 socket/互斥量，第二实例转发 argv 后退出） | 🔵 代码一致，⚠️ 待真机 |
 
+| 20a | 详情窗（大图/全文） | `ShowDetail`：图片等比放大、长文本可滚，Esc/点击关闭 | 同一套（`mygo.Window` + `ui.Scroll`） | 🔵 平台无关 |
 | 20 | 列表分页 | 一页 200 条、滚到底续页、顶栏显示真实总数 | 同一套（`db.CountQuery` + `ui.ScrollState`，与平台无关） | 🔵 平台无关 |
 | 21 | 键盘导航 | `↑↓←→`、`PgUp/PgDn` 翻页、`⌘F` 回搜索框、`⌥⏎` 纯文本 | 同一套（`ui.Cmd` 在 Windows 是 Ctrl，`ui.Alt` 是 Alt） | 🔵 代码一致，⚠️ 待真机（Alt+⏎ 会不会被输入框吃掉） |
 | 22 | 暂停记录 | 托盘勾选「暂停记录」，暂停期间不读剪贴板 | 同一套（`Shell_NotifyIcon` 菜单勾选项） | 🔵 代码一致，⚠️ 待真机 |

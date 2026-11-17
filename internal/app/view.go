@@ -223,9 +223,9 @@ func (a *App) filterBar(c *ui.Context, l panelLayout) ui.Element {
 	kind, groupNow := a.FilterState()
 
 	kindNow := kind
-	labels := []string{"全部", "收藏", "置顶", "图片", "文件"}
+	labels := []string{"全部", "收藏", "置顶", "图片", "文件", "敏感"}
 	if l.compactFilter {
-		labels = []string{"全部", "★", "📌", "图", "件"}
+		labels = []string{"全部", "★", "📌", "图", "件", "🔒"}
 	}
 	// 这一行留白处可以拖着走（frameless 面板没有标题栏）
 	bar := ui.Row(c).Height(26).Gap(8).AlignItems(ui.Center).DragWindow()
@@ -267,6 +267,16 @@ func (a *App) filterBar(c *ui.Context, l panelLayout) ui.Element {
 						a.SetGroupFilter(pick)
 					}
 				})
+			}
+		}
+		// 全选：⌘A 被搜索框吃掉了，这里给一个看得见的入口（有勾选时变成取消）
+		if marked := len(a.Marked()); marked > 0 {
+			if ui.Button(c, fmt.Sprintf("取消全选 (%d)", marked)).Clicked() {
+				a.later(func() { a.ClearMarks() })
+			}
+		} else if len(a.Rows()) > 0 {
+			if ui.Button(c, "全选").Clicked() {
+				a.later(func() { a.MarkAllLoaded() })
 			}
 		}
 		if l.showCount {
@@ -435,6 +445,12 @@ func (a *App) listView(c *ui.Context) {
 								ui.Text(c, Slot(index)).FontSize(9).TextColor(fg)
 							}
 							ui.Text(c, row.Tag).FontSize(10).TextColor(fg)
+							if row.GroupName != "" {
+								ui.Text(c, "#"+row.GroupName).FontSize(9).TextColor(fg)
+							}
+							if row.Note != "" {
+								ui.Text(c, "📝").FontSize(9).TextColor(fg)
+							}
 							mark := ""
 							if row.Pinned {
 								mark += "📌 "
@@ -520,10 +536,16 @@ func (a *App) previewView(c *ui.Context, l panelLayout) {
 		case row.Kind == model.KindImage:
 			a.previewImage(c, row, l, th)
 		case row.Kind == model.KindText || row.Kind == model.KindHtml || row.Kind == model.KindRtf:
-			// 只看个大概：截断显示，不做内嵌滚动（长文本来回滚也没人看）
+			// 只看个大概：截断显示；长文本给「查看全文」进详情窗（内嵌滚动没人爱用）
 			if content := excerpt(row.Content, 220); content != "" {
 				a.summaryText(c, content, a.Query(), th.Text, th).FontSize(12).Wrap().
 					MaxHeight(previewContentBudget(a.previewH))
+			}
+			if len([]rune(row.Content)) > 220 {
+				shot := row
+				if ui.Button(c, "查看全文（"+itoa64(int64(len([]rune(row.Content))))+" 字）").Clicked() {
+					a.later(func() { a.ShowDetail(shot) })
+				}
 			}
 		case row.Kind == model.KindFiles:
 			ui.Text(c, excerpt(row.Content, 300)).FontSize(11).TextColor(th.TextMuted).Wrap()
@@ -575,6 +597,9 @@ func (a *App) previewHeader(c *ui.Context, row Row, th *ui.Theme) ui.Element {
 			meta += fmt.Sprintf(" · 用过 %d 次", row.UseCount)
 		}
 		ui.Text(c, meta).FontSize(11).TextColor(th.TextMuted)
+		if row.CreatedAt != "" {
+			ui.Text(c, "· 创建 "+row.CreatedAt).FontSize(10).TextColor(th.TextMuted)
+		}
 		ui.Box(c).Grow(1)
 		mark := ""
 		if row.Pinned {
@@ -638,7 +663,7 @@ func (a *App) previewImage(c *ui.Context, row Row, l panelLayout, th *ui.Theme) 
 	shot := row
 	area := ui.Column(c).Height(box).Background(th.Surface).Radius(8).
 		Justify(ui.Center).AlignItems(ui.Center).Gap(6).Cursor(ui.CursorPointer).
-		OnClick(func() { a.later(func() { a.ShowImage(shot) }) })
+		OnClick(func() { a.later(func() { a.ShowDetail(shot) }) })
 	a.imageRect = area.Bounds()
 	if os.Getenv("CLIPNEST_DEBUG_RECTS") != "" {
 		b := a.imageRect

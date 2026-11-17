@@ -106,7 +106,7 @@ func main() {
 			MinWidth:  200,
 			MinHeight: 160,
 			Hidden:    true,
-			Content:   ui.View(a.ImageView),
+			Content:   ui.View(a.DetailView),
 		})
 		preview.OnClose(func(e *mygo.CloseEvent) {
 			if a.Quitting() {

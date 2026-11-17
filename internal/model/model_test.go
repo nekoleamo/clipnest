@@ -88,3 +88,18 @@ func TestNowIsSortableISO8601(t *testing.T) {
 		t.Fatalf("格式不对：%s", a)
 	}
 }
+
+// TestDateTimeFormatsLocal 创建时间显示成「01-02 15:04」（本地时区）。
+func TestDateTimeFormatsLocal(t *testing.T) {
+	ts := "2026-11-17T04:05:00.000Z"
+	got := DateTime(ts)
+	if len(got) != len("01-02 15:04") {
+		t.Fatalf("格式不对：%q", got)
+	}
+	if !strings.Contains(got, "-") || !strings.Contains(got, ":") {
+		t.Fatalf("格式不对：%q", got)
+	}
+	if DateTime("坏时间") != "坏时间" {
+		t.Fatal("解析失败应当原样返回")
+	}
+}

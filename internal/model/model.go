@@ -159,6 +159,17 @@ func RelativeTime(ts string) string {
 	}
 }
 
+// DateTime 把时间戳格式成本地「01-02 15:04」（预览里显示创建时间用）。
+//
+// 和 RelativeTime 的分工：列表看「多久以前」，详情看具体时刻。
+func DateTime(ts string) string {
+	at, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		return ts
+	}
+	return at.Local().Format("01-02 15:04")
+}
+
 func itoa(v int64) string {
 	if v == 0 {
 		return "0"
