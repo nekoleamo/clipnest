@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"bytes"
 	"database/sql"
 	"path/filepath"
 	"testing"
@@ -333,4 +334,32 @@ func mustSeal(t *testing.T, database *sqlDB) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+// TestRemoteNameDecodesHref PROPFIND 的 href 是 URL 编码的：带空格/中文的包名要能认出来。
+func TestRemoteNameDecodesHref(t *testing.T) {
+	cases := []struct{ href, want string }{
+		{"/clipnest/", ""},
+		{"/clipnest/A.json", "A.json"},
+		{"/clipnest/my%20mac.json", "my mac.json"},
+		{"/clipnest/%E5%8F%B0%E5%BC%8F%E6%9C%BA.json", "台式机.json"},
+		{"https://nas.local/dav/clipnest/a%20b.json", "a b.json"},
+	}
+	for _, tc := range cases {
+		if got := remoteName(tc.href); got != tc.want {
+			t.Fatalf("remoteName(%q) = %q，期望 %q", tc.href, got, tc.want)
+		}
+	}
+}
+
+// TestReadLimitedRejectsOversize 超过上限的远端响应要报错，而不是把内存吃光。
+func TestReadLimitedRejectsOversize(t *testing.T) {
+	big := bytes.Repeat([]byte("x"), maxRemoteBytes+10)
+	if _, err := readLimited(bytes.NewReader(big)); err == nil {
+		t.Fatal("超过上限应当报错")
+	}
+	ok := bytes.Repeat([]byte("x"), 1024)
+	if data, err := readLimited(bytes.NewReader(ok)); err != nil || len(data) != 1024 {
+		t.Fatalf("正常大小应当读出来：%v len=%d", err, len(data))
+	}
 }

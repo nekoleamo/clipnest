@@ -20,9 +20,15 @@ const (
 )
 
 // bitmap 缓存：图片条目按文件路径缓存 GPU 位图（每帧解码会卡）。
+//
+// 淘汰用先进先出：满了就丢最早进来的那几张，而不是整表清空——
+// 整表清空会让「滚大图列表」每 128 张就把可见的图全部重新解码一遍。
+const bitmapCacheLimit = 128
+
 var (
-	bitmapMu  sync.Mutex
-	bitmapMap = map[string]*ui.Bitmap{}
+	bitmapMu    sync.Mutex
+	bitmapMap   = map[string]*ui.Bitmap{}
+	bitmapOrder []string
 )
 
 // bitmapFor 读并缓存一张位图；读不到就是 nil。
@@ -43,12 +49,24 @@ func bitmapFor(path string) *ui.Bitmap {
 		return nil
 	}
 	bitmapMu.Lock()
-	if len(bitmapMap) > 128 { // 简单上限：满了就整个清掉，避免无限增长
-		bitmapMap = map[string]*ui.Bitmap{}
+	if _, ok := bitmapMap[path]; !ok {
+		for len(bitmapMap) >= bitmapCacheLimit && len(bitmapOrder) > 0 {
+			oldest := bitmapOrder[0]
+			bitmapOrder = bitmapOrder[1:]
+			delete(bitmapMap, oldest)
+		}
+		bitmapMap[path] = b
+		bitmapOrder = append(bitmapOrder, path)
 	}
-	bitmapMap[path] = b
 	bitmapMu.Unlock()
 	return b
+}
+
+// bitmapCacheLen 是当前缓存条数（测试用）。
+func bitmapCacheLen() int {
+	bitmapMu.Lock()
+	defer bitmapMu.Unlock()
+	return len(bitmapMap)
 }
 
 // panelView 是面板的视图函数。

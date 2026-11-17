@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -112,6 +113,26 @@ func NewWebDavTransport(url, remoteDir, user, password string, insecureTLS bool)
 	}
 }
 
+// maxRemoteBytes 是单个远端响应的读取上限（正常增量包几十 KB，图片原图最多几 MB）。
+//
+// 没有上限的话，一个被写坏/被塞满的远端文件会把常驻进程直接撑爆。
+const maxRemoteBytes = 64 << 20
+
+// ErrRemoteTooLarge 表示远端响应超过上限。
+var ErrRemoteTooLarge = errors.New("远端响应超过上限")
+
+// readLimited 读 body 并检查上限。
+func readLimited(r io.Reader) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, maxRemoteBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxRemoteBytes {
+		return nil, fmt.Errorf("%w（%d 字节以上）", ErrRemoteTooLarge, maxRemoteBytes)
+	}
+	return data, nil
+}
+
 // do 发一个请求（WebDAV 的自定义方法需要自己拼）。
 func (t *WebDavTransport) do(method, target string, body []byte) (*http.Response, error) {
 	var reader io.Reader
@@ -165,13 +186,13 @@ func (t *WebDavTransport) List() ([]string, error) {
 	if resp.StatusCode != 207 && resp.StatusCode != 200 {
 		return nil, fmt.Errorf("PROPFIND: %s", resp.Status)
 	}
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := readLimited(resp.Body)
 	if err != nil {
 		return nil, err
 	}
 	var out []string
 	for _, href := range extractHrefs(string(raw)) {
-		name := path.Base(href)
+		name := remoteName(href)
 		if strings.HasSuffix(name, ".json") {
 			out = append(out, name)
 		}
@@ -209,7 +230,27 @@ func (t *WebDavTransport) Get(name string) ([]byte, error) {
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("GET %s: %s", name, resp.Status)
 	}
-	return io.ReadAll(resp.Body)
+	return readLimited(resp.Body)
+}
+
+// remoteName 从 PROPFIND 的 href 里取文件名。
+//
+// href 是 URL 编码过的（空格是 %20、中文是 %XX），不解码的话带空格/中文的
+// 包名永远认不出来，那一轮就白拉了。
+func remoteName(href string) string {
+	if u, err := url.Parse(href); err == nil && u.Path != "" {
+		if strings.HasSuffix(u.Path, "/") {
+			return "" // 目录（含根目录）不是包
+		}
+		if unescaped, err := url.PathUnescape(u.Path); err == nil {
+			return path.Base(unescaped)
+		}
+		return path.Base(u.Path)
+	}
+	if unescaped, err := url.PathUnescape(href); err == nil {
+		return path.Base(unescaped)
+	}
+	return path.Base(href)
 }
 
 // Put 上传一个文件（父目录不存在时先建：飞牛等 NAS 会回 403 而不是 409）。
