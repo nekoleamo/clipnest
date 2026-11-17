@@ -79,7 +79,7 @@ irm https://gitee.com/null_593_5354/clipnest/raw/main/install.ps1 | iex
 
 ## 许可
 
-MIT，见 `LICENSE`（`Copyright (c) 2026 丁盛 (nekoleamo)`）。
+MIT，见 `LICENSE`（`Copyright (c) 2026 nekoleamo`）。
 
 二进制里链接的第三方代码各自保留原许可证（MIT / BSD-3 / Apache-2.0 等），全文见
 `THIRD-PARTY-LICENSES.md`；发版前用 `python3 tools/thirdparty.py` 重新生成，确保版权声明随分发一起保留。
