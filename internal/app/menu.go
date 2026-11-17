@@ -17,6 +17,9 @@ func (a *App) rowMenu(m *ui.Menu, row Row) {
 	if m.Item("复制").Shortcut(ui.Cmd, ui.KeyY).Chosen() {
 		a.Copy(row)
 	}
+	if m.Item("粘贴为纯文本").Shortcut(ui.Alt, ui.KeyEnter).Chosen() {
+		a.PastePlain(row)
+	}
 	if m.Item("导出为文件…").Shortcut(ui.Cmd, ui.KeyO).Chosen() {
 		a.ExportTo(row)
 	}

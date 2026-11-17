@@ -288,6 +288,8 @@ func (a *App) bindKeys(root ui.Element, c *ui.Context) {
 	root.OnShortcut(ui.Cmd, ui.KeyS, rowAction(func(r Row) bool { return a.ToggleFlag(r, FlagFavorite) }))
 	root.OnShortcut(ui.Cmd, ui.KeyE, rowAction(func(r Row) bool { return a.ToggleFlag(r, FlagSensitive) }))
 	root.OnShortcut(ui.Cmd, ui.KeyY, rowAction(func(r Row) bool { return a.Copy(r) }))
+	// ⌥⏎：纯文本粘贴（富文本条目的降级入口）
+	root.OnShortcut(ui.Alt, ui.KeyEnter, rowAction(func(r Row) bool { return a.PastePlain(r) }))
 	root.OnShortcut(ui.Cmd, ui.KeyO, rowAction(func(r Row) bool {
 		a.ExportTo(r) // 先选保存位置（与右键菜单「导出为文件…」一致）
 		return true

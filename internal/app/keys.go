@@ -15,16 +15,16 @@ import (
 const (
 	macHotkey     = "⌘⇧V"
 	macSlotPrefix = "⌘"
-	macHints      = "⏎ 粘贴 · ⌘1-9 直贴 · ⌘D 删 · ⌘P 置顶 · ⌘S 收藏 · ⌘E 敏感 · ⌘O 导出 · ⌘Y 复制"
-	macHintsShort = "⏎ 粘贴 · ⌘1-9 直贴 · ⌘D 删 · ⌘S 收藏"
+	macHints      = "⏎ 粘贴 · ⌥⏎ 纯文本 · ⌘1-9 直贴 · ⌘D 删 · ⌘P 置顶 · ⌘S 收藏 · ⌘E 敏感 · ⌘O 导出 · ⌘Y 复制"
+	macHintsShort = "⏎ 粘贴 · ⌥⏎ 纯文本 · ⌘1-9 直贴 · ⌘D 删 · ⌘S 收藏"
 )
 
 // 其它平台的展示符号。
 const (
 	winHotkey     = "Ctrl+Shift+V"
 	winSlotPrefix = "Ctrl+"
-	winHints      = "⏎ 粘贴 · Ctrl+1-9 直贴 · Ctrl+D 删 · Ctrl+P 置顶 · Ctrl+S 收藏 · Ctrl+E 敏感 · Ctrl+O 导出 · Ctrl+Y 复制"
-	winHintsShort = "⏎ 粘贴 · Ctrl+1-9 直贴 · Ctrl+D 删 · Ctrl+S 收藏"
+	winHints      = "⏎ 粘贴 · Alt+⏎ 纯文本 · Ctrl+1-9 直贴 · Ctrl+D 删 · Ctrl+P 置顶 · Ctrl+S 收藏 · Ctrl+E 敏感 · Ctrl+O 导出 · Ctrl+Y 复制"
+	winHintsShort = "⏎ 粘贴 · Alt+⏎ 纯文本 · Ctrl+1-9 直贴 · Ctrl+D 删 · Ctrl+S 收藏"
 )
 
 // Hotkey 是默认快捷键的展示文案（没有自定义时用）。

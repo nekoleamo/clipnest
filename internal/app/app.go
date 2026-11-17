@@ -91,6 +91,8 @@ type App struct {
 	previewCard ui.Rect
 	// zoomProbe 只在测试里用：点预览图时把 row 交出去断言
 	zoomProbe func(Row)
+	// plainProbe 只在测试里用：纯文本粘贴时把 row 交出去断言（不碰真剪贴板）
+	plainProbe func(Row)
 	// imageWin/imageRow 是「点预览图放大看」的独立窗口
 	imageWin *mygo.Window
 	imageRow Row
@@ -728,6 +730,35 @@ func (a *App) Paste(row Row) bool {
 		logf("PASTE touch failed: %v", err)
 	}
 	logf("PASTE id=%d kind=%s", item.ID, item.Kind)
+	a.Dismiss()
+	pasteAfterWriteBack()
+	return true
+}
+
+// PastePlain 以纯文本粘贴：HTML/RTF 剥成纯文本、文件给路径，再走一次粘贴。
+//
+// 富文本条目原样写回时，粘进纯文本目标会出标签/控制符，所以留一个降级入口。
+func (a *App) PastePlain(row Row) bool {
+	if a.plainProbe != nil {
+		a.plainProbe(row)
+		return true
+	}
+	item, ok, err := db.Get(a.Store.DB, row.ID)
+	if err != nil || !ok {
+		a.SetStatus("❌ 条目不存在")
+		return false
+	}
+	hashes, err := clip.WriteBackPlain(item, a.Paths)
+	if err != nil {
+		logf("PASTEPLAIN failed id=%d: %v", row.ID, err)
+		a.SetStatus("❌ " + err.Error())
+		return false
+	}
+	a.Guard.Expect(hashes...)
+	if err := db.Touch(a.Store.DB, item.ID); err != nil {
+		logf("PASTEPLAIN touch failed: %v", err)
+	}
+	logf("PASTEPLAIN id=%d kind=%s", item.ID, item.Kind)
 	a.Dismiss()
 	pasteAfterWriteBack()
 	return true
