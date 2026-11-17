@@ -107,6 +107,28 @@ func (a *App) SetImageWindow(win *mygo.Window) {
 	a.mu.Unlock()
 }
 
+// StepDetail 在详情窗里切到相邻条目（+-1）；越界就停在原地。
+func (a *App) StepDetail(delta int) {
+	a.mu.Lock()
+	cur := a.imageRow.ID
+	rows := a.rows
+	a.mu.Unlock()
+	if len(rows) == 0 {
+		return
+	}
+	next := -1
+	for i := range rows {
+		if rows[i].ID == cur {
+			next = i + delta
+			break
+		}
+	}
+	if next < 0 || next >= len(rows) {
+		return
+	}
+	a.ShowDetail(rows[next])
+}
+
 // HideImage 关掉大图窗口。
 func (a *App) HideImage() {
 	a.mu.Lock()
@@ -134,6 +156,9 @@ func (a *App) DetailView(c *ui.Context) {
 	a.mu.Unlock()
 
 	c.OnWindowShortcut(0, ui.KeyEscape, func() { a.HideImage() })
+	// ←→ 在同一条「历史」里换相邻条目（图片看下一张、长文本看下一条）
+	c.OnWindowShortcut(0, ui.KeyLeft, func() { a.StepDetail(-1) })
+	c.OnWindowShortcut(0, ui.KeyRight, func() { a.StepDetail(1) })
 
 	root := ui.Column(c).Fill().Padding(10).Gap(6).Background(th.Background)
 	root.OnClick(func() { a.later(a.HideImage) })
@@ -173,10 +198,10 @@ func fmtSize(row Row) string {
 // fmtDetailHint 是详情窗底部那行说明。
 func fmtDetailHint(row Row) string {
 	if row.Kind == model.KindImage {
-		return fmtSize(row) + " · 点任意处或 Esc 关闭"
+		return fmtSize(row) + " · ←→ 换图 · 点任意处或 Esc 关闭"
 	}
 	n := len([]rune(row.Content))
-	return fmt.Sprintf("%s · %d 字 · Esc 关闭", TagOf(row.Kind), n)
+	return fmt.Sprintf("%s · %d 字 · ←→ 换条 · Esc 关闭", TagOf(row.Kind), n)
 }
 
 func itoa64(v int64) string {

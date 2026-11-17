@@ -215,6 +215,46 @@ func (s *Store) Remove(id int64) (bool, error) {
 	return true, nil
 }
 
+// RemoveKeepingFiles 批量删除，但把图片文件留着并返回它们的路径。
+//
+// 撤销窗口用：面板删条目后 10 秒内允许撤销，期间图片文件不能删（删了就恢复不出原图）。
+// 调用方在窗口过去后调 DeleteImageFiles 真正回收。
+func (s *Store) RemoveKeepingFiles(ids []int64) ([]db.RowData, []string, error) {
+	snaps := make([]db.RowData, 0, len(ids))
+	var files []string
+	for _, id := range ids {
+		snap, ok, err := db.DumpRow(s.DB, id)
+		if err != nil {
+			return snaps, files, err
+		}
+		if !ok {
+			continue
+		}
+		if snap.Kind == string(model.KindImage) {
+			hash := strings.TrimSuffix(snap.Content, ".png")
+			files = append(files, s.Paths.ImageOrigin(hash), s.Paths.ImageThumbnail(hash))
+		}
+		// 与 Remove 不同：这里不删图片文件
+		deleted, err := db.Delete(s.DB, id)
+		if err != nil {
+			return snaps, files, err
+		}
+		if deleted {
+			snaps = append(snaps, snap)
+		}
+	}
+	return snaps, files, nil
+}
+
+// DeleteImageFiles 真正回收一批图片文件（撤销窗口过后调用）。
+func (s *Store) DeleteImageFiles(paths []string) {
+	for _, p := range paths {
+		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+			logf("IMAGE delete failed %s: %v", p, err)
+		}
+	}
+}
+
 // RemoveMany 批量删除（图片资源连带回收），返回真正删掉的条数。
 func (s *Store) RemoveMany(ids []int64) (int, error) {
 	deleted := 0

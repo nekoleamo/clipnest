@@ -61,6 +61,9 @@ type App struct {
 	mu         sync.Mutex // 保护下面所有可变状态
 	captureMu  sync.Mutex // 序列化采集：OnChanged 可能并发投递，两个回调同时入库会撞唯一键
 	sincePrune int        // 上次裁剪之后又进了多少条（裁剪不必每条都跑）
+	// undo 是最近一次删除的快照与撤销窗口（图片文件在窗口内先不真删）
+	undo       undoState
+	undoGen    int
 	debounceMu sync.Mutex // 保护 debounce
 
 	// —— 窗口与视图句柄 ——
@@ -151,6 +154,8 @@ type probes struct {
 	zoom func(Row)
 	// plain 在纯文本粘贴时把 row 交出去（测试里不碰真剪贴板）
 	plain func(Row)
+	// paste 在普通粘贴时把 row 交出去（测试里不碰真剪贴板）
+	paste func(Row)
 }
 
 // New 建好应用（不启动窗口）。

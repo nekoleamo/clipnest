@@ -158,6 +158,95 @@ func Delete(db *sql.DB, id int64) (bool, error) {
 	return true, nil
 }
 
+// RowData 是一条条目的完整快照（删除撤销用：恢复时连时间戳与原 id 之外的字段都要原样）。
+type RowData struct {
+	ID          int64
+	ContentHash string
+	Kind        string
+	Content     string
+	FileTypes   *string
+	Width       *int64
+	Height      *int64
+	UseCount    int64
+	Pinned      bool
+	Favorite    bool
+	Sensitive   bool
+	Note        *string
+	GroupID     *int64
+	CreatedAt   string
+	UpdatedAt   string
+	MetaAt      string
+}
+
+// DumpRow 把一条拍成快照（含内部列）；不存在返回 false。
+func DumpRow(db *sql.DB, id int64) (RowData, bool, error) {
+	var (
+		r                           RowData
+		fileTypes, note             sql.NullString
+		width, height, groupID      sql.NullInt64
+		pinned, favorite, sensitive int64
+	)
+	err := db.QueryRow(`SELECT id, content_hash, kind, content, file_types, width, height,
+			use_count, pinned, favorite, sensitive, note, group_id, created_at, updated_at, meta_at
+		FROM items WHERE id = ?`, id).Scan(&r.ID, &r.ContentHash, &r.Kind, &r.Content, &fileTypes,
+		&width, &height, &r.UseCount, &pinned, &favorite, &sensitive, &note, &groupID,
+		&r.CreatedAt, &r.UpdatedAt, &r.MetaAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return RowData{}, false, nil
+	}
+	if err != nil {
+		return RowData{}, false, err
+	}
+	if fileTypes.Valid {
+		v := fileTypes.String
+		r.FileTypes = &v
+	}
+	if note.Valid {
+		v := note.String
+		r.Note = &v
+	}
+	if width.Valid {
+		v := width.Int64
+		r.Width = &v
+	}
+	if height.Valid {
+		v := height.Int64
+		r.Height = &v
+	}
+	if groupID.Valid {
+		v := groupID.Int64
+		r.GroupID = &v
+	}
+	r.Pinned, r.Favorite, r.Sensitive = pinned != 0, favorite != 0, sensitive != 0
+	return r, true, nil
+}
+
+// RestoreRow 把快照写回库（撤销删除）：同时清掉它对应的墓碑，别让同步再把删除推回来。
+//
+// updated_at 用「现在」而不是快照里的旧值：撤销也是一次改动，得让别的设备重新拿到它。
+func RestoreRow(db *sql.DB, r RowData) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	now := model.Now()
+	if _, err := tx.Exec(`INSERT INTO items(content_hash, kind, content, file_types, width, height,
+			use_count, pinned, favorite, note, group_id, sensitive, created_at, updated_at, meta_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(content_hash) DO UPDATE SET
+			updated_at = excluded.updated_at, meta_at = excluded.meta_at`,
+		r.ContentHash, r.Kind, r.Content, r.FileTypes, r.Width, r.Height, r.UseCount,
+		boolInt(r.Pinned), boolInt(r.Favorite), r.Note, r.GroupID, boolInt(r.Sensitive),
+		r.CreatedAt, now, now); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("DELETE FROM tombstones WHERE content_hash = ?", r.ContentHash); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // Count 是总条数。
 func Count(db *sql.DB) (int64, error) {
 	var n int64

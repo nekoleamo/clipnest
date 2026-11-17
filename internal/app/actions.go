@@ -19,6 +19,10 @@ import (
 
 // Paste 粘贴一行：写回剪贴板 → 计一次使用 → 收起面板 → 发 ⌘V。
 func (a *App) Paste(row Row) bool {
+	if a.probe.paste != nil {
+		a.probe.paste(row)
+		return true
+	}
 	item, ok, err := db.Get(a.Store.DB, row.ID)
 	if err != nil || !ok {
 		logf("PASTE missing id=%d err=%v", row.ID, err)

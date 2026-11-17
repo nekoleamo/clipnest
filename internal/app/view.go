@@ -152,36 +152,47 @@ func (a *App) panelView(c *ui.Context) {
 	a.runPending()
 }
 
-// searchField 是搜索框（首次显示自动聚焦）。
+// searchField 是搜索框（首次显示自动聚焦）；有内容时右侧出现清除按钮。
 func (a *App) searchField(c *ui.Context) ui.Element {
 	th := c.Theme()
 	q := a.Query()
-	in := ui.TextInput(c, &q).
-		Placeholder("搜索剪贴板历史…").
-		FontSize(13).
-		Padding(8, 6).
-		Radius(6).
-		Background(th.Surface).
-		TextColor(th.Text).
-		PlaceholderColor(th.TextMuted).
-		CaretColor(th.Text).
-		AutoFocus().
-		Bind(&a.searchInput)
-	if a.takeFocusSearchNext() {
-		in.Focus() // 刚唤出：焦点放回搜索框，可以直接打字
-	}
-	a.bindSearchInput(&a.searchInput, c)
-	if in.Changed() {
-		a.later(func() { a.SetQuery(q) })
-	}
-	if in.Submitted() {
-		a.later(func() {
-			if row, ok := a.Selected(); ok {
-				a.Paste(row)
+	row := ui.Row(c).FillWidth().Gap(6)
+	row.Children(func() {
+		in := ui.TextInput(c, &q).
+			Placeholder("搜索剪贴板历史…").
+			FontSize(13).
+			Padding(8, 6).
+			Radius(6).
+			Grow(1).
+			Background(th.Surface).
+			TextColor(th.Text).
+			PlaceholderColor(th.TextMuted).
+			CaretColor(th.Text).
+			AutoFocus().
+			Bind(&a.searchInput)
+		if a.takeFocusSearchNext() {
+			in.Focus() // 刚唤出：焦点放回搜索框，可以直接打字
+		}
+		a.bindSearchInput(&a.searchInput, c)
+		if in.Changed() {
+			typed := q
+			a.later(func() { a.SetQuery(typed) })
+		}
+		if in.Submitted() {
+			a.later(func() {
+				if row, ok := a.Selected(); ok {
+					a.Paste(row)
+				}
+			})
+		}
+		if q != "" {
+			// 清空搜索：比「全选 + 删除」快，也比 Esc（会收起面板）温和
+			if ui.Button(c, "✕").Clicked() {
+				a.later(func() { a.ClearQuery() })
 			}
-		})
-	}
-	return in
+		}
+	})
+	return row
 }
 
 // panelLayout 是依面板宽度算出来的布局取舍。
@@ -269,6 +280,12 @@ func (a *App) filterBar(c *ui.Context, l panelLayout) ui.Element {
 				})
 			}
 		}
+		// 撤销删除：删完 10 秒内出现（⌘Z 在输入框里会被吃掉，所以必须有个看得见的按钮）
+		if a.CanUndo() {
+			if ui.Button(c, "撤销删除").Clicked() {
+				a.later(func() { a.UndoDelete() })
+			}
+		}
 		// 全选：⌘A 被搜索框吃掉了，这里给一个看得见的入口（有勾选时变成取消）
 		if marked := len(a.Marked()); marked > 0 {
 			if ui.Button(c, fmt.Sprintf("取消全选 (%d)", marked)).Clicked() {
@@ -317,6 +334,8 @@ func (a *App) bindKeys(root ui.Element, c *ui.Context) {
 	root.OnShortcut(0, ui.KeyPageUp, func() { a.MovePage(-1) })
 	root.OnShortcut(0, ui.KeyPageDown, func() { a.MovePage(1) })
 	root.OnShortcut(ui.Cmd, ui.KeyF, func() { a.FocusSearch() })
+	// ⌘Z 不绑：焦点在搜索框里时它被输入框当作「撤销输入」吃掉（实测），
+	// 撤销删除只走筛选栏那个「撤销删除」按钮（删完 10 秒内出现）。
 
 	root.OnShortcut(ui.Cmd, ui.KeyD, rowAction(func(r Row) bool {
 		a.DeleteMarked(r, true) // 有勾选就删勾选的，否则删当前这条
@@ -360,6 +379,8 @@ func (a *App) listView(c *ui.Context) {
 
 	var accY float32
 	var selTop, selH float32
+	// 标记集合一帧取一次：原来每行都 a.IsMarked(id)，200 行就是 200 次加锁
+	markedSet := a.MarkedSet()
 	ui.Column(c).Fill().Children(func() {
 		scroll := ui.Scroll(c).Grow(1).TrackScroll(&a.ListScroll)
 		b := scroll.Bounds()
@@ -393,7 +414,7 @@ func (a *App) listView(c *ui.Context) {
 					}
 
 					rowID := row.ID
-					marked := a.IsMarked(row.ID)
+					marked := markedSet[row.ID]
 					if marked && index != sel {
 						bg = th.Surface // 勾上的行给个底色，与选中区分
 					}
@@ -405,6 +426,12 @@ func (a *App) listView(c *ui.Context) {
 							a.Select(index)
 						}
 						a.refocusSearch()
+					}
+					// 双击 = 直接粘贴（剪贴板管理器最自然的手势）；单击仍是选中
+					dblPaste := func() {
+						if row, ok := a.RowAt(index); ok {
+							a.Paste(row)
+						}
 					}
 					var rowEl ui.Element
 					rowEl = ui.Column(c).Key(fmt.Sprintf("row-%d", row.ID)).
@@ -418,6 +445,10 @@ func (a *App) listView(c *ui.Context) {
 						}).
 						// 按住往窗口外拖 = 拖拽导出（文本给纯文本，图片/文件给文件）
 						DragDataFrom(func() transfer.Data { return a.DragData(rowID) })
+					// 双击 = 粘贴。必须在构建期问：点击回调跑在下一帧，那时连击状态已经清了
+					if rowEl.DoubleClicked() {
+						a.later(dblPaste)
+					}
 					rowH := rowEl.Bounds().H
 					if rowH <= 0 {
 						rowH = 28 // 首帧还没有高度，用估的
@@ -468,6 +499,9 @@ func (a *App) listView(c *ui.Context) {
 									a.later(func() { clicked(mods) })
 								}).
 								ContextMenu(func(m *ui.Menu) { a.rowMenu(m, row) })
+							if sumEl.DoubleClicked() {
+								a.later(dblPaste)
+							}
 							if row.UseCount > 1 {
 								ui.Text(c, fmt.Sprintf("×%d", row.UseCount)).FontSize(9).TextColor(fg)
 							}

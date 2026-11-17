@@ -153,6 +153,12 @@ func (a *App) Groups() []db.Group {
 	return append([]db.Group(nil), a.groups...)
 }
 
+// ClearQuery 清空搜索词并重查（搜索框那个 ✕）。
+func (a *App) ClearQuery() {
+	a.SetQuery("")
+	a.FocusSearch()
+}
+
 // SetQuery 改搜索词并重查。
 func (a *App) SetQuery(q string) {
 	a.mu.Lock()
@@ -556,6 +562,20 @@ func (a *App) IsMarked(id int64) bool {
 	return a.marked[id]
 }
 
+// MarkedSet 返回标记集合的快照（渲染时用：一帧只取一次，别每行加一次锁）。
+func (a *App) MarkedSet() map[int64]bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.marked) == 0 {
+		return nil
+	}
+	out := make(map[int64]bool, len(a.marked))
+	for id := range a.marked {
+		out[id] = true
+	}
+	return out
+}
+
 // Marked 返回已标记的 id（按列表顺序，方便状态文案）。
 func (a *App) Marked() []int64 {
 	a.mu.Lock()
@@ -638,25 +658,103 @@ func (a *App) DeleteMarked(fallback Row, hasFallback bool) int {
 		}
 		ids = []int64{fallback.ID}
 	}
-	n, err := a.Store.RemoveMany(ids)
+	// 图片文件先留着：撤销窗口内要能恢复原图，窗口过去才真回收（undoAfter）
+	snaps, files, err := a.Store.RemoveKeepingFiles(ids)
 	if err != nil {
 		logf("REMOVE MANY failed n=%d: %v", len(ids), err)
 		a.SetStatus("❌ " + err.Error())
 		return 0
 	}
+	a.setUndo(snaps, files)
 	a.mu.Lock()
 	a.marked = nil
 	a.mu.Unlock()
 	a.Refresh()
 	switch {
-	case n == 0:
+	case len(snaps) == 0:
 		a.SetStatus("没有删掉任何条目")
 	case multi:
-		a.SetStatus(fmt.Sprintf("已删除 %d 条", n))
+		a.SetStatus(fmt.Sprintf("已删除 %d 条 · 10 秒内可撤销", len(snaps)))
 	default:
-		a.SetStatus("已删除")
+		a.SetStatus("已删除 · 10 秒内可撤销")
 	}
-	return n
+	return len(snaps)
+}
+
+// UndoAfter 是撤销删除的窗口。
+const UndoAfter = 10 * time.Second
+
+// undoState 是最近一次删除的快照（只记最近一批）。
+type undoState struct {
+	snaps []db.RowData
+	files []string
+	at    time.Time
+	gen   int
+}
+
+// setUndo 记下这次删除并安排「窗口过了回收图片文件」。
+func (a *App) setUndo(snaps []db.RowData, files []string) {
+	a.mu.Lock()
+	a.undoGen++
+	gen := a.undoGen
+	a.undo = undoState{snaps: snaps, files: files, at: time.Now(), gen: gen}
+	a.mu.Unlock()
+	// 窗口结束时重画一次：撤销按钮/状态文案要跟着消失
+	time.AfterFunc(UndoAfter, a.invalidate)
+	if len(files) == 0 {
+		return
+	}
+	time.AfterFunc(UndoAfter, func() {
+		a.mu.Lock()
+		stale := a.undo.gen != gen || time.Since(a.undo.at) >= UndoAfter
+		var files []string
+		if stale {
+			files = a.undo.files
+			a.undo = undoState{}
+		}
+		a.mu.Unlock()
+		if len(files) > 0 {
+			a.Store.DeleteImageFiles(files) // 窗口过了没人撤销：真删
+		}
+	})
+}
+
+// CanUndo 报告现在有没有可撤销的删除。
+func (a *App) CanUndo() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.undo.snaps) > 0 && time.Since(a.undo.at) < UndoAfter
+}
+
+// UndoDelete 把最近一次删除恢复回来（⌘Z / 底栏「撤销」按钮）。
+func (a *App) UndoDelete() int {
+	a.mu.Lock()
+	state := a.undo
+	a.undo = undoState{}
+	a.mu.Unlock()
+	if len(state.snaps) == 0 {
+		a.SetStatus("没有可撤销的删除")
+		return 0
+	}
+	if time.Since(state.at) >= UndoAfter {
+		a.Store.DeleteImageFiles(state.files)
+		a.SetStatus("撤销窗口已过（10 秒）")
+		return 0
+	}
+	restored := 0
+	for _, snap := range state.snaps {
+		if err := db.RestoreRow(a.Store.DB, snap); err != nil {
+			logf("UNDO restore failed id=%d: %v", snap.ID, err)
+			a.SetStatus("❌ 恢复失败：" + err.Error())
+			continue
+		}
+		restored++
+	}
+	a.Refresh()
+	if restored > 0 {
+		a.SetStatus(fmt.Sprintf("已撤销，恢复 %d 条", restored))
+	}
+	return restored
 }
 
 // ToggleFlag 切换置顶/收藏/敏感。契约 6：这类改动不刷新 updated_at。
