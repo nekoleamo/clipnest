@@ -76,4 +76,53 @@ cask "clipnest" do
 end
 RUBY
 
-echo "== 完成：$OUT/clipnest.cask.rb"
+echo "== 生成 Windows 安装脚本（把 OWNER/REPO 烤进去）"
+WIN_SHA=$(grep "windows-x86_64.zip" "$OUT/SHA256SUMS" | awk '{print $1}')
+for f in install.sh install.ps1; do
+  sed -e "s|__CLIPNEST_REPO__|${OWNER}/${REPO}|g" \
+      -e "s|__CLIPNEST_GITEE_REPO__|${GITEE_OWNER:-$OWNER}/${GITEE_REPO:-$REPO}|g" \
+      "tools/$f" >"$OUT/$f"
+  chmod +x "$OUT/$f"
+done
+
+echo "== 生成 Scoop manifest"
+cat >"$OUT/clipnest.scoop.json" <<JSON
+{
+  "version": "${VERSION}",
+  "description": "剪贴板历史管理器，自带 NAS 同步",
+  "homepage": "https://github.com/${OWNER}/${REPO}",
+  "license": "MIT",
+  "url": "https://github.com/${OWNER}/${REPO}/releases/download/v${VERSION}/clipnest-${VERSION}-windows-x86_64.zip",
+  "hash": "${WIN_SHA}",
+  "shortcuts": [
+    ["clipnest.exe", "clipnest"]
+  ],
+  "notes": [
+    "数据在 %APPDATA% 下的 clipnest 目录；卸载不会删除，要清干净请手动删掉",
+    "首次启动托盘出现 ❐ 图标，Ctrl+Shift+V 唤出面板"
+  ],
+  "checkver": {
+    "github": "https://github.com/${OWNER}/${REPO}"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/${OWNER}/${REPO}/releases/download/v\$version/clipnest-\$version-windows-x86_64.zip"
+      }
+    }
+  }
+}
+JSON
+python3 -m json.tool "$OUT/clipnest.scoop.json" >/dev/null || { echo "❌ scoop manifest 不是合法 JSON"; exit 1; }
+
+echo "== 完成"
+echo "   $OUT/clipnest.cask.rb      （放自建 tap: Casks/clipnest.rb）"
+echo "   $OUT/clipnest.scoop.json   （放自建 bucket: bucket/clipnest.json）"
+echo "   $OUT/install.sh / install.ps1（拷到仓库根目录，供一键安装用）"
+echo ""
+echo "对外可以宣传的安装方式："
+echo "  brew tap ${OWNER}/clipnest && brew install --cask clipnest"
+echo "  scoop bucket add clipnest https://github.com/${OWNER}/scoop-clipnest && scoop install clipnest"
+echo "  curl -fsSL https://raw.githubusercontent.com/${OWNER}/${REPO}/main/install.sh | sh"
+echo "  irm https://raw.githubusercontent.com/${OWNER}/${REPO}/main/install.ps1 | iex"
+echo "  （国内把 raw.githubusercontent.com 换成 gitee.com/${GITEE_OWNER:-$OWNER}/${GITEE_REPO:-$REPO}/raw/main）"
