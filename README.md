@@ -54,6 +54,27 @@ docs/                       路线图、执行计划、验证记录
 | `AGENTS.md` | 项目约定 + mygo 已确认的坑 |
 | `docs/nsh-时代的历史坑.md` | nsh 0.5.1 与 Rust 时代的全部实测坑（历史参考） |
 
+## 安装
+
+```bash
+brew tap nekoleamo/clipnest && brew install --cask clipnest          # macOS（Homebrew）
+curl -fsSL https://raw.githubusercontent.com/nekoleamo/clipnest/main/install.sh | sh   # macOS（一把梭）
+scoop bucket add clipnest https://github.com/nekoleamo/scoop-clipnest && scoop install clipnest   # Windows
+irm https://raw.githubusercontent.com/nekoleamo/clipnest/main/install.ps1 | iex        # Windows（一把梭）
+```
+
+国内网络把域名换成 Gitee 镜像（下载走哪边脚本会自动挑，连不上 GitHub 就换 Gitee）：
+
+```bash
+brew tap null_593_5354/clipnest https://gitee.com/null_593_5354/homebrew-clipnest
+curl -fsSL https://gitee.com/null_593_5354/clipnest/raw/main/install.sh | sh
+scoop bucket add clipnest https://gitee.com/null_593_5354/scoop-clipnest
+irm https://gitee.com/null_593_5354/clipnest/raw/main/install.ps1 | iex
+```
+
+都是未签名版本：包管理器和 `curl`/`irm` 下载不带隔离标记，所以不会触发 Gatekeeper / SmartScreen。
+用浏览器直接下 zip 才会拦，需要手动「右键 → 打开」或 `xattr -dr com.apple.quarantine`。
+
 ## 许可
 
 MIT，见 `LICENSE`（`Copyright (c) 2026 丁盛 (nekoleamo)`）。

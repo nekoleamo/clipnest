@@ -4,7 +4,8 @@
 # 用法：
 #   tools/release-go.sh                 # 版本号取自 mygo.json
 #   tools/release-go.sh 1.0.1           # 临时指定版本号
-#   OWNER=xxx REPO=clipnest tools/release-go.sh
+#   tools/release-go.sh                        # 默认推到 nekoleamo/clipnest（GitHub）
+#   GITEE_OWNER=null_593_5354 tools/release-go.sh
 #
 # 产物在 dist/：
 #   clipnest-<ver>-macos.zip         （.app，ditto 打包保留符号链接）
@@ -16,8 +17,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 VERSION="${1:-$(python3 -c "import json;print(json.load(open('mygo.json'))['version'])")}"
-OWNER="${OWNER:-OWNER}"
+OWNER="${OWNER:-nekoleamo}"
 REPO="${REPO:-clipnest}"
+# Gitee 镜像的仓库名/账号可以不同（Gitee 的账号 id 是注册时自动生成的）
+GITEE_OWNER="${GITEE_OWNER:-null_593_5354}"
+GITEE_REPO="${GITEE_REPO:-$REPO}"
 OUT="dist"
 PLATFORMS="${PLATFORMS:-darwin/universal,windows/amd64}"
 
@@ -80,7 +84,7 @@ echo "== 生成 Windows 安装脚本（把 OWNER/REPO 烤进去）"
 WIN_SHA=$(grep "windows-x86_64.zip" "$OUT/SHA256SUMS" | awk '{print $1}')
 for f in install.sh install.ps1; do
   sed -e "s|__CLIPNEST_REPO__|${OWNER}/${REPO}|g" \
-      -e "s|__CLIPNEST_GITEE_REPO__|${GITEE_OWNER:-$OWNER}/${GITEE_REPO:-$REPO}|g" \
+      -e "s|__CLIPNEST_GITEE_REPO__|${GITEE_OWNER}/${GITEE_REPO}|g" \
       "tools/$f" >"$OUT/$f"
   chmod +x "$OUT/$f"
 done
@@ -125,4 +129,4 @@ echo "  brew tap ${OWNER}/clipnest && brew install --cask clipnest"
 echo "  scoop bucket add clipnest https://github.com/${OWNER}/scoop-clipnest && scoop install clipnest"
 echo "  curl -fsSL https://raw.githubusercontent.com/${OWNER}/${REPO}/main/install.sh | sh"
 echo "  irm https://raw.githubusercontent.com/${OWNER}/${REPO}/main/install.ps1 | iex"
-echo "  （国内把 raw.githubusercontent.com 换成 gitee.com/${GITEE_OWNER:-$OWNER}/${GITEE_REPO:-$REPO}/raw/main）"
+echo "  （国内把 raw.githubusercontent.com 换成 gitee.com/${GITEE_OWNER}/${GITEE_REPO}/raw/main）"
