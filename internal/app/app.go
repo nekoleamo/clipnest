@@ -182,13 +182,22 @@ func (a *App) Quit() {
 	a.MarkQuitting()
 	a.mu.Lock()
 	wins := []*mygo.Window{a.panel, a.prefs, a.imageWin}
+	tray := a.tray
 	a.mu.Unlock()
 	for _, w := range wins {
 		if w != nil {
 			w.Hide()
 		}
 	}
-	mygo.App.Quit()
+	// 先把状态栏图标拆掉：从托盘菜单点退出时，菜单还在跟踪中就退进程，
+	// AppKit 会把图标留在原地变成「幽灵」——之后点什么都没反应，只能重新登录。
+	if tray != nil {
+		tray.Destroy()
+	}
+	// 稍等一下让菜单收起、图标移除完成，再真正退出
+	time.AfterFunc(150*time.Millisecond, func() {
+		mygo.App.Quit()
+	})
 }
 
 // MarkQuitting 在 OnBeforeQuit 里调用。
