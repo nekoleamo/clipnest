@@ -594,7 +594,8 @@ func (a *App) MovePage(delta int) {
 	a.mu.Unlock()
 	a.MoveTo(sel + delta*step)
 	if delta > 0 && sel+step >= n && a.HasMore() {
-		a.LoadMore() // 翻到底部先补一页，别让 End/PgDn 卡在已加载的尽头
+		// 翻到底部先补一页，别让 PgDn 卡在已加载的尽头；排到帧末，别在回调里重查
+		a.later(func() { a.LoadMore() })
 	}
 }
 

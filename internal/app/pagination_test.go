@@ -156,6 +156,7 @@ func TestPagingKeys(t *testing.T) {
 	tester.Frame()
 	tester.KeyDown(ui.KeyPageDown)
 	tester.Frame()
+	tester.Frame() // 补页排在帧末
 	if !a.HasMore() && len(a.Rows()) != PageSize+10 {
 		t.Fatalf("翻到底应当补上下一页，实际已加载 %d", len(a.Rows()))
 	}
