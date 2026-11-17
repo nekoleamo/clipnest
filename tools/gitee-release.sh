@@ -50,11 +50,11 @@ do_curl() {
   local method="$1" url="$2"; shift 2
   local out code
   local -a args=(-sS --max-time 60 -X "$method" "$url")
-  if [ "${AUTH_MODE}" = "header" ]; then
-    args+=(-H "Authorization: token ${GITEE_TOKEN}")
-  else
-    args+=(--get --data-urlencode "access_token=${GITEE_TOKEN}")
-  fi
+  case "${AUTH_MODE}" in
+    header) args+=(-H "Authorization: token ${GITEE_TOKEN}") ;;
+    query)  args+=(--get --data-urlencode "access_token=${GITEE_TOKEN}") ;;
+    form)   args+=(-F "access_token=${GITEE_TOKEN}") ;;
+  esac
   out="$(curl "${args[@]}" "$@" -w '\n__CODE__%{http_code}')" || { echo "curl 失败" >&2; return 1; }
   code="${out##*__CODE__}"
   out="${out%__CODE__*}"
@@ -115,16 +115,27 @@ print(f"镜像自 GitHub Releases（{tag}）。\n\n"
       "Windows `irm https://gitee.com/null_593_5354/clipnest/raw/main/install.ps1 | iex`")
 PY
 )"
-  payload="$(python3 -c '
-import json,sys
-print(json.dumps({"tag_name": sys.argv[1], "name": sys.argv[1], "body": sys.argv[2], "prerelease": False}, ensure_ascii=False))' "$TAG" "$notes")"
-  if ! resp="$(api POST "/releases" -H 'Content-Type: application/json' -d "$payload" 2>/dev/null)"; then
-    echo "❌ 建 release 失败。" >&2
-    echo "   排查顺序：①token 要有 projects 权限 ②**这个仓库要在 token 的授权仓库列表里**" >&2
-    echo "   （Gitee 对「已登录但没纳管这个仓库」返回 404，不是 403——2026-11 实测踩过）" >&2
-    echo "   ③tag 要已推到 Gitee（git push gitee ${TAG}）④组织仓库可能要管理员权限" >&2
-    exit 1
+  # Gitee 这个接口只吃 formData（multipart/表单），且 target_commitish 必填；
+  # 发 JSON body 会被当成没带参数（实测回 404，特别像权限问题，其实是参数没绑上）。
+  target="$(git rev-parse "$TAG^{commit}" 2>/dev/null || echo main)"
+  err="$(mktemp)"
+  if ! resp="$(api POST "/releases" \
+      -F "tag_name=$TAG" -F "name=$TAG" -F "body=$notes" \
+      -F "target_commitish=$target" -F "prerelease=false" 2>"$err")"; then
+    AUTH_MODE="form"   # 头鉴权若被拒，退回接口文档要求的表单字段
+    if ! resp="$(api POST "/releases" \
+        -F "tag_name=$TAG" -F "name=$TAG" -F "body=$notes" \
+        -F "target_commitish=$target" -F "prerelease=false" 2>"$err")"; then
+      echo "❌ 建 release 失败。" >&2
+      echo "   接口返回：$(tail -2 "$err" | tr '\n' ' ')" >&2
+      echo "   排查顺序：①tag 要已推到 Gitee（git push gitee ${TAG}）" >&2
+      echo "   ②这个仓库要在 token 的授权仓库列表里（Gitee 对没纳管回 404，不是 403）" >&2
+      echo "   ③token 要有 projects 写权限 ④组织仓库可能要管理员权限" >&2
+      rm -f "$err"
+      exit 1
+    fi
   fi
+  rm -f "$err"
   RID="$(printf '%s' "$resp" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("id",""))')"
   [ -n "$RID" ] || { echo "❌ 建 release 没返回 id：$resp" >&2; exit 1; }
   echo "· 已建 release id=$RID"

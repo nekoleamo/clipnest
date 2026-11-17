@@ -65,6 +65,26 @@ class H(BaseHTTPRequestHandler):
             return self._json(200, {"ok": True})
         return self._json(404, {"message": "no route " + path})
 
+    def _fields(self, body):
+        """把 multipart 表单拆成 {name: value}；不是 multipart 就当没带参数。"""
+        ct = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in ct or "boundary=" not in ct:
+            return {}
+        boundary = ct.split("boundary=")[1].strip().strip('"').encode()
+        out = {}
+        for part in body.split(b"--" + boundary):
+            if b"\r\n\r\n" not in part:
+                continue
+            head, val = part.split(b"\r\n\r\n", 1)
+            head_s = head.decode("utf8", "replace")
+            if 'name="' not in head_s:
+                continue
+            name = head_s.split('name="')[1].split('"')[0]
+            out[name] = val.rstrip(b"\r\n-").decode("utf8", "replace")
+            if 'filename="' in head_s:
+                out[name + ":filename"] = head_s.split('filename="')[1].split('"')[0]
+        return out
+
     def do_POST(self):
         path = self.path.split("?")[0]
         n = int(self.headers.get("Content-Length") or 0)
@@ -72,12 +92,19 @@ class H(BaseHTTPRequestHandler):
         if not self._auth_ok():
             return self._json(401, {"message": "401 Unauthorized"})
         if path.endswith("/releases"):
+            # 真实 Gitee 只吃 formData 且 target_commitish 必填；发 JSON 会「像没带参数」→ 404
+            f = self._fields(body)
+            missing = [k for k in ("tag_name", "name", "body", "target_commitish") if not f.get(k)]
+            if missing:
+                return self._json(404, {"message": "Not Found（缺参数：" + ",".join(missing) + "）"})
             STATE["release"] = 42
+            STATE["target"] = f.get("target_commitish")
             return self._json(201, {"id": 42})
         if path.endswith("/attach_files"):
-            names = [l.split(b'filename="')[1].split(b'"')[0].decode() for l in body.split(b"\r\n") if b'filename="' in l]
-            for name in names:
-                STATE["assets"].append({"name": name})
+            f = self._fields(body)
+            if "file" not in f:
+                return self._json(404, {"message": "Not Found（缺 file）"})
+            STATE["assets"].append({"name": f.get("file:filename", "")})
             return self._json(201, {"ok": True})
         return self._json(404, {"message": "no route " + path})
 
