@@ -294,7 +294,8 @@ func (a *App) bindKeys(root ui.Element, c *ui.Context) {
 		a.DeleteMarked(r, true) // 有勾选就删勾选的，否则删当前这条
 		return true
 	}))
-	root.OnShortcut(ui.Cmd, ui.KeyA, func() { a.MarkAllLoaded() })
+	// ⌘A 不绑：焦点在搜索框里时它被输入框当成「全选文本」吃掉（⇧⌘A 也一样），
+	// 全选走右键菜单。勾选单靠 ⌘/Ctrl 点击。
 	root.OnShortcut(ui.Cmd, ui.KeyP, rowAction(func(r Row) bool { return a.ToggleFlag(r, FlagPinned) }))
 	root.OnShortcut(ui.Cmd, ui.KeyS, rowAction(func(r Row) bool { return a.ToggleFlag(r, FlagFavorite) }))
 	root.OnShortcut(ui.Cmd, ui.KeyE, rowAction(func(r Row) bool { return a.ToggleFlag(r, FlagSensitive) }))

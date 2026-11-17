@@ -69,6 +69,8 @@ docs/            路线图、执行计划、验证记录
 17. 签名与 TCC：**已改用固定自签身份 `clipnest-dev`（`mygo.json` 的 `macos.signingIdentity`）**，实测重打包后辅助功能授权与钥匙串 ACL 都保持不变，不用再点。两个坑：①从 ad-hoc 换到证书时，TCC 里会残留一条匹配不上的旧记录（日志：`Failed to match existing code requirement`），面板就会永远提示去授权——`tccutil reset Accessibility com.clipnest.app` 后重新勾一次就好；②若换机器/丢了身份（`mygo build` 回退 ad-hoc cdhash），授权会每次重打包失效，跑 `tools/signing-identity.sh` 重建。排查入口：`<data>/clipnest.log` 里的 `SHOW ax=`、`go run ./cmd/syncprobe -probe`、`open -a clipnest.app --args -ax-prompt`
 18. **Column 里的子行要用 `FillWidth()` 而不是 `Fill()`**：`Fill()` 连高度一起占满，会把下面所有东西顶到窗口外（症状：整版偏下、搜索框跑到 400px 处、列表看不见）。辅助功能提示条就踩过这个坑——没授 AX 授权时整块版式崩掉，而且 `go test ./internal/app` 会随测试进程有没有 AX 授权时绿时红
 19. **面板只是 `Hide` 不是销毁，跨轮状态会留着**：搜索词、选中行、筛选、`ListScroll`、备注草稿、以及排进 `App.pending` 却没跑完的点击动作，都会在下次呼出时冒出来。`Show` 必须先走 `ResetPanelState()`（`internal/app/app.go`），否则「Esc 退出再呼出」看到的就是上次的样子
+20. **焦点在搜索框里时，单行输入框会吃掉一些键**：`Home/End` 被当成「光标到行首/行尾」吃掉（root 上的 `OnShortcut` 永远收不到，实测过），`⌘A`/`⇧⌘A` 同理（全选文本），所以「全选」只能走右键菜单。能穿过输入框的有 `↑↓←→`、`PgUp/PgDn`、`⌥⏎`、`⌘F`。要加列表快捷键先确认这一点，否则会写出一条永不触发的绑定
+21. **行点击要看修饰键就得读自己元素的 `ClickModifiers()`**：点击回调在下一帧跑，元素变量得先 `var el ui.Element` 声明再赋值；另外点在「摘要文字」上是子元素自己的 `OnClick`（父行收不到），父子两处都要绑，否则 ⌘点击在文字上不生效
 
 ## 每轮收尾
 

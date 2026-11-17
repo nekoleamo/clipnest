@@ -60,7 +60,7 @@ func (a *App) rowMenu(m *ui.Menu, row Row) {
 			a.ClearMarks()
 		}
 	} else {
-		if m.Item(fmt.Sprintf("全选已加载的 %d 条", len(a.Rows()))).Shortcut(ui.Cmd, ui.KeyA).Chosen() {
+		if m.Item(fmt.Sprintf("全选已加载的 %d 条", len(a.Rows()))).Chosen() {
 			a.MarkAllLoaded()
 		}
 	}
