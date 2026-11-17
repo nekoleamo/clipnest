@@ -18,11 +18,7 @@ func (a *App) rowMenu(m *ui.Menu, row Row) {
 		a.Copy(row)
 	}
 	if m.Item("导出为文件…").Shortcut(ui.Cmd, ui.KeyO).Chosen() {
-		if err := a.ExportWithDialog(row); err != nil {
-			a.SetStatus("❌ " + err.Error())
-		} else {
-			a.SetStatus("已导出")
-		}
+		a.ExportTo(row)
 	}
 
 	m.Separator()

@@ -276,11 +276,7 @@ func (a *App) bindKeys(root ui.Element, c *ui.Context) {
 	root.OnShortcut(ui.Cmd, ui.KeyE, rowAction(func(r Row) bool { return a.ToggleFlag(r, FlagSensitive) }))
 	root.OnShortcut(ui.Cmd, ui.KeyY, rowAction(func(r Row) bool { return a.Copy(r) }))
 	root.OnShortcut(ui.Cmd, ui.KeyO, rowAction(func(r Row) bool {
-		if file, err := a.Export(r); err != nil {
-			a.SetStatus("❌ " + err.Error())
-		} else {
-			a.SetStatus("已导出 " + baseName(file) + "（⌘V 可粘文件）")
-		}
+		a.ExportTo(r) // 先选保存位置（与右键菜单「导出为文件…」一致）
 		return true
 	}))
 
@@ -492,13 +488,7 @@ func (a *App) previewView(c *ui.Context, l panelLayout) {
 			})
 			iconAction(c, th, IconExport, "导出", func() {
 				r := row
-				a.later(func() {
-					if file, err := a.Export(r); err != nil {
-						a.SetStatus("❌ " + err.Error())
-					} else {
-						a.SetStatus("已导出 " + baseName(file) + "（⌘V 可粘文件）")
-					}
-				})
+				a.later(func() { a.ExportTo(r) }) // 先选保存位置，不静默写到导出目录
 			})
 			ui.Box(c).Grow(1)
 			ui.Text(c, "⌘Y / ⌘O").FontSize(10).TextColor(th.TextMuted)

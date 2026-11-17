@@ -789,52 +789,6 @@ func (a *App) ToggleFlag(row Row, flag Flag) bool {
 	return next
 }
 
-// Export 导出当前条目成文件，并把文件放进剪贴板（拖拽导出的降级方案）。
-//
-// files 条目不用导出：它们本来就在磁盘上，直接放进剪贴板。
-func (a *App) Export(row Row) (string, error) {
-	item, ok, err := db.Get(a.Store.DB, row.ID)
-	if err != nil || !ok {
-		return "", fmt.Errorf("条目不存在")
-	}
-	var files []string
-	switch item.Kind {
-	case model.KindFiles:
-		for _, line := range strings.Split(item.Content, "\n") {
-			if line != "" && fileExists(line) {
-				files = append(files, line)
-			}
-		}
-		if len(files) == 0 {
-			return "", fmt.Errorf("文件条目里的路径都不在了")
-		}
-	case model.KindImage:
-		hash := strings.TrimSuffix(item.Content, ".png")
-		origin := a.Paths.ImageOrigin(hash)
-		dest := filepathJoin(a.exportDir(), hash+".png")
-		if err := copyFile(origin, dest); err != nil {
-			return "", err
-		}
-		files = []string{dest}
-	default:
-		name := fmt.Sprintf("clipnest-%d.txt", item.ID)
-		dest := filepathJoin(a.exportDir(), name)
-		if err := writeFile(dest, []byte(item.Content)); err != nil {
-			return "", err
-		}
-		files = []string{dest}
-	}
-
-	hashes, err := clip.PutFiles(files)
-	if err != nil {
-		return "", err
-	}
-	a.Guard.Expect(hashes...)
-	logf("EXPORT id=%d files=%v", item.ID, files)
-	paste.ClaimForeground()
-	return files[0], nil
-}
-
 // DragData 是拖拽导出用的载荷：图片与文件给文件 URL，文本给纯文本。
 //
 // 图片给的是 origin 里的真文件（拖出去默认是复制，原文件不会被动）。
@@ -903,13 +857,26 @@ func (a *App) dragData(id int64) transfer.Data {
 	}
 }
 
-// ExportWithDialog 让用户先选位置再导出（右键菜单用）。
+// ExportTo 让用户先选位置再导出，并把结果写到底栏（右键菜单/⌘O/右栏按钮共用）。
+func (a *App) ExportTo(row Row) {
+	// 保存对话框会把前台抢走，关掉之后把键盘焦点还给搜索框（方向键继续选）
+	defer a.refocusSearch()
+	msg, err := a.ExportWithDialog(row)
+	switch {
+	case err != nil:
+		a.SetStatus("❌ " + err.Error())
+	case msg != "":
+		a.SetStatus(msg)
+	}
+}
+
+// ExportWithDialog 让用户先选位置再导出，返回一句能放进底栏的说明（取消时为空）。
 //
 // 文本/图片选「保存到哪个文件」，文件条目选「复制到哪个目录」。
-func (a *App) ExportWithDialog(row Row) error {
+func (a *App) ExportWithDialog(row Row) (string, error) {
 	item, ok, err := db.Get(a.Store.DB, row.ID)
 	if err != nil || !ok {
-		return fmt.Errorf("条目不存在")
+		return "", fmt.Errorf("条目不存在")
 	}
 	dir := a.exportDir()
 
@@ -922,10 +889,10 @@ func (a *App) ExportWithDialog(row Row) error {
 			Directory:   true,
 		})
 		if err != nil {
-			return err
+			return "", err
 		}
 		if len(targets) == 0 {
-			return nil // 取消
+			return "", nil // 取消
 		}
 		dest := targets[0]
 		n := 0
@@ -934,15 +901,15 @@ func (a *App) ExportWithDialog(row Row) error {
 				continue
 			}
 			if err := copyFile(line, filepathJoin(dest, baseName(line))); err != nil {
-				return err
+				return "", err
 			}
 			n++
 		}
 		if n == 0 {
-			return fmt.Errorf("文件条目里的路径都不在了")
+			return "", fmt.Errorf("文件条目里的路径都不在了")
 		}
 		logf("EXPORT dialog files=%d to=%s", n, dest)
-		return nil
+		return fmt.Sprintf("已复制 %d 个文件到 %s", n, baseName(dest)), nil
 
 	case model.KindImage:
 		hash := strings.TrimSuffix(item.Content, ".png")
@@ -952,14 +919,17 @@ func (a *App) ExportWithDialog(row Row) error {
 			DefaultPath: filepathJoin(dir, hash+".png"),
 			ButtonLabel: "导出",
 		})
-		if err != nil || path == "" {
-			return err
+		if err != nil {
+			return "", err
+		}
+		if path == "" {
+			return "", nil // 取消
 		}
 		if err := copyFile(origin, path); err != nil {
-			return err
+			return "", err
 		}
 		logf("EXPORT dialog image=%s", path)
-		return nil
+		return "已导出 " + baseName(path), nil
 
 	default:
 		path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
@@ -967,14 +937,17 @@ func (a *App) ExportWithDialog(row Row) error {
 			DefaultPath: filepathJoin(dir, fmt.Sprintf("clipnest-%d.txt", item.ID)),
 			ButtonLabel: "导出",
 		})
-		if err != nil || path == "" {
-			return err
+		if err != nil {
+			return "", err
+		}
+		if path == "" {
+			return "", nil // 取消
 		}
 		if err := writeFile(path, []byte(item.Content)); err != nil {
-			return err
+			return "", err
 		}
 		logf("EXPORT dialog text=%s", path)
-		return nil
+		return "已导出 " + baseName(path), nil
 	}
 }
 
