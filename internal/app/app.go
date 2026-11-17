@@ -1225,6 +1225,26 @@ func (a *App) exportDir() string {
 	return filepathJoin(home, "Downloads")
 }
 
+// pickBackupFile 让用户挑一个 .cnbak；取消返回空串（默认落在数据根 backups/）。
+func (a *App) pickBackupFile() string {
+	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		Title:       "选择要导入的备份",
+		DefaultPath: a.Paths.BackupsDir(),
+		ButtonLabel: "导入",
+		Filters: []mygo.FileFilter{
+			{Name: "clipnest 备份", Extensions: []string{"cnbak"}},
+		},
+	})
+	if err != nil {
+		logf("BACKUP pick failed: %v", err)
+		return ""
+	}
+	if len(paths) == 0 {
+		return ""
+	}
+	return paths[0]
+}
+
 // TogglePanel 显示/收起面板（快捷键与托盘共用）。
 func (a *App) TogglePanel() {
 	w := a.panelWindow()

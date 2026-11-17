@@ -231,16 +231,16 @@ func (a *App) prefsView(c *ui.Context) {
 							status = "✅ 已导出 " + baseName(path)
 						}
 					}
-					if ui.Button(c, "导入最新备份").Clicked() {
-						list := backup.Backups(a.Paths)
-						if len(list) == 0 {
-							status = "⚠️ backups/ 里没有 .cnbak"
-						} else if passphrase == "" {
+					if ui.Button(c, "导入备份…").Clicked() {
+						if passphrase == "" {
 							status = "⚠️ 请先填口令再导入"
-						} else if report, err := backup.Import(a.Store.DB, list[0], passphrase); err != nil {
+						} else if path := a.pickBackupFile(); path == "" {
+							status = "已取消导入"
+						} else if report, err := backup.Import(a.Store.DB, path, passphrase); err != nil {
 							status = "❌ 导入失败：" + err.Error()
 						} else {
-							status = fmt.Sprintf("✅ 导入 %d 条（跳过 %d）", report.Inserted, report.Skipped)
+							status = fmt.Sprintf("✅ 导入 %d 条（跳过 %d）来自 %s",
+								report.Inserted, report.Skipped, baseName(path))
 							a.Refresh()
 						}
 					}

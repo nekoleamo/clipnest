@@ -20,8 +20,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 	"time"
 
 	"golang.org/x/crypto/argon2"
@@ -256,22 +254,6 @@ func collect(db *sql.DB) (Payload, error) {
 		out.Groups = append(out.Groups, g)
 	}
 	return out, groups.Err()
-}
-
-// Backups 列出已有备份，新的在前（文件名带时间戳，倒序即可）。
-func Backups(p paths.Paths) []string {
-	entries, err := os.ReadDir(p.BackupsDir())
-	if err != nil {
-		return nil
-	}
-	var out []string
-	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".cnbak") {
-			out = append(out, filepath.Join(p.BackupsDir(), e.Name()))
-		}
-	}
-	sort.Sort(sort.Reverse(sort.StringSlice(out)))
-	return out
 }
 
 // Import 从 path 导入：只补齐缺失条目，不覆盖本地已有的同哈希条目。
