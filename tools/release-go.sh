@@ -89,6 +89,12 @@ for f in install.sh install.ps1; do
   chmod +x "$OUT/$f"
 done
 
+echo "== 生成 Gitee 用的变体（URL 指向 gitee 的发行版，供国内 tap/bucket 用）"
+sed -e "s|https://github.com/${OWNER}/${REPO}|https://gitee.com/${GITEE_OWNER}/${GITEE_REPO}|g" \
+  "$OUT/clipnest.cask.rb" >"$OUT/clipnest.gitee.cask.rb"
+sed -e "s|https://github.com/${OWNER}/${REPO}|https://gitee.com/${GITEE_OWNER}/${GITEE_REPO}|g" \
+  "$OUT/clipnest.scoop.json" >"$OUT/clipnest.gitee.scoop.json"
+
 echo "== 生成 Scoop manifest"
 cat >"$OUT/clipnest.scoop.json" <<JSON
 {
