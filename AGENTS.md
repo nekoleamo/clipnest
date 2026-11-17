@@ -40,7 +40,8 @@ docs/            路线图、执行计划、验证记录
 ## 迁移铁律
 
 1. `docs/路线图.md` 第四节的 **12 条行为契约**在 Go 侧必须逐条成立，改一条要重开评估
-2. `internal/db` 的迁移脚本**只追加**，已发布脚本不可改
+2. `internal/db` 的迁移脚本**只追加**，已发布脚本不可改。步骤现在是 `func(*sql.Tx) error`：纯 SQL 用 `sqlMigration(...)`，**加列类迁移必须先 `hasColumn` 再 ALTER**（SQLite 没有 `ADD COLUMN IF NOT EXISTS`，重跑会炸——`TestMigrateAdvancesVersionAndKeepsData` 会退化重跑一遍迁移）
+2b. **元数据与同步**：契约 6 规定置顶/收藏/敏感/备注/分组**不刷新 `updated_at`**，所以增量同步另看 `items.meta_at`（迁移 v3）。新增任何「改了但不该动排序」的字段，要同时写 `meta_at`，否则那项改动永远出不了本机
 3. `content_hash = blake3("<kind>:<content>")`；去重命中只 `use_count + 1` 并刷新 `updated_at`
 4. 搜索：长词走 FTS5，**trigram 查询词 <3 字符必须降级 `LIKE`**（2 个汉字命中不了）
 5. 自身写回必须被 guard 抑制，不产生新记录
