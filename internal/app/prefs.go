@@ -90,7 +90,7 @@ func (a *App) prefsView(c *ui.Context) {
 		}
 		if encrypt && passphrase != "" {
 			if err := clipsync.SecretSet(clipsync.SecretService, nextCfg.DeviceName, passphrase); err != nil {
-				status = "⚠️ 口令没写进钥匙串：" + err.Error()
+				status = "⚠️ 口令没写进" + clipsync.SecretStoreName() + "：" + err.Error()
 			}
 		}
 		if backendKind == 1 && passphrase != "" {
@@ -174,7 +174,7 @@ func (a *App) prefsView(c *ui.Context) {
 					ui.TextInput(c, &remoteURL)
 					label(c, "备用地址（Tailscale / 外网；局域网不通时自动切过去）", th)
 					ui.TextInput(c, &fallbackURL).Placeholder("https://nas.<tailnet>.ts.net:5006")
-					label(c, "用户名 / 口令（口令写进系统钥匙串）", th)
+					label(c, "用户名 / 口令（口令写进"+clipsync.SecretStoreName()+"）", th)
 					ui.TextInput(c, &remoteUser)
 					ui.TextInput(c, &passphrase).Placeholder("口令 / 同步口令（留空不改）")
 					label(c, "远端目录", th)

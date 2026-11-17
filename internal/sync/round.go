@@ -3,6 +3,7 @@ package sync
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 
@@ -27,7 +28,7 @@ func RunOnce(db *sql.DB, cfg Config, p paths.Paths) (SyncReport, error) {
 	if cfg.Encryption.Enabled {
 		passphrase, err := secretGet(SecretService, device)
 		if err != nil || passphrase == "" {
-			return SyncReport{}, errors.New("钥匙串里没有同步口令（先在设置里填一个）")
+			return SyncReport{}, fmt.Errorf("%s里没有同步口令（先在设置里填一个）", SecretStoreName())
 		}
 		seal, open := backup.Sealer(passphrase)
 		return runRound(db, transport, ep, device, p, seal, open, cfg)

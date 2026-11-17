@@ -25,7 +25,8 @@
 | 15 | 多显示器定位 | `mygo.Screen.CursorScreenPoint()` + `DisplayNearestPoint()` + `SetPosition`（运行时随时改） | 同一套（框架按 DPI 换算 DIP，`MonitorFromRect`） | ✅ macOS 实测，⚠️ 待真机（高 DPI） |
 | 16 | 图片存储 | `images/{origin,thumbnails}/<hh>/<hash>.png`（blake3 命名） | 同（纯文件操作） | 🔵 平台无关 |
 | 17 | 导出 | `⌘O` 写文件 + `mygo.Clipboard.WriteFiles()` | 同一套（`CF_HDROP`） | ⚠️ 待真机 |
-| 18 | 同步 | `internal/sync`：WebDAV（`net/http` 自定义 PROPFIND/MKCOL/PUT）+ 端到端加密；增量按 `updated_at`/`meta_at` 双时间戳 | 同一套（纯 Go HTTP；口令走 `mygo.Secrets` → Windows DPAPI） | 🔵 平台无关 |
+| 18 | 同步 | `internal/sync`：WebDAV（`net/http` 自定义 PROPFIND/MKCOL/PUT）+ 端到端加密；增量按 `updated_at`/`meta_at` 双时间戳 | 同一套（纯 Go HTTP） | 🔵 平台无关 |
+| 18b | 口令存储 | macOS 钥匙串（按 App 的 ACL，重装后 cdhash 变了会弹一次授权） | `mygo.Secrets` → Windows 凭据管理器里的通用凭据（`clipnest-sync/<设备名>`），DPAPI 按用户加密，**读不弹框**；作用域是「本用户」而不是「本 App」 | 🔵 代码一致，⚠️ 待真机（域名账号下凭据会随漫游配置走） |
 | 19 | 单实例 | `mygo.App.RequestSingleInstanceLock()` + `OnSecondInstance` 唤出面板 | 同一套（框架用命名 socket/互斥量，第二实例转发 argv 后退出） | 🔵 代码一致，⚠️ 待真机 |
 
 | 20a | 详情窗（大图/全文） | `ShowDetail`：图片等比放大、长文本可滚，Esc/点击关闭 | 同一套（`mygo.Window` + `ui.Scroll`） | 🔵 平台无关 |
