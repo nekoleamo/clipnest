@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# 仓库内的 pre-push 钩子：内容就是 tools/pre-push.sh。
+# 启用：git config core.hooksPath .githooks
+exec "$(git rev-parse --show-toplevel)/tools/pre-push.sh"
