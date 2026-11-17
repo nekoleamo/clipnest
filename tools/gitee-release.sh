@@ -148,8 +148,23 @@ have="$(api GET "/releases/$RID" 2>/dev/null |
 for f in "${FILES[@]}"; do
   name="$(basename "$f")"
   if printf '%s\n' "$have" | grep -qx "$name"; then
-    echo "· $name 已存在，跳过"
-    continue
+    if [ "${GITEE_REPLACE:-}" != "1" ]; then
+      echo "· $name 已存在，跳过（换产物用 GITEE_REPLACE=1）"
+      continue
+    fi
+    # 同名附件不能直接盖：先查 id 再删掉，然后重新上传
+    aid="$(api GET "/releases/$RID/attach_files" 2>/dev/null | python3 -c '
+import json,sys
+for a in json.load(sys.stdin) or []:
+    if not isinstance(a, dict):
+        continue
+    if a.get("name")==sys.argv[1]:
+        print(a.get("id","")); break
+' "$name")"
+    if [ -n "$aid" ]; then
+      api DELETE "/releases/$RID/attach_files/$aid" >/dev/null 2>&1 || true
+      echo "· $name 删旧附件 id=$aid"
+    fi
   fi
   printf '· 上传 %s … ' "$name"
   if api POST "/releases/$RID/attach_files" -F "file=@$f" >/dev/null 2>&1; then

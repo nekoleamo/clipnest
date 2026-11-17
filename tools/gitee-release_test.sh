@@ -60,6 +60,8 @@ class H(BaseHTTPRequestHandler):
             return self._json(200, {"id": STATE["release"]})
         if path.endswith("/releases/42"):
             return self._json(200, {"id": 42, "assets": STATE["assets"]})
+        if path.endswith("/attach_files"):
+            return self._json(200, STATE["assets"])
         # 匿名回查附件
         if "/releases/download/" in path:
             return self._json(200, {"ok": True})
@@ -85,6 +87,13 @@ class H(BaseHTTPRequestHandler):
                 out[name + ":filename"] = head_s.split('filename="')[1].split('"')[0]
         return out
 
+    def do_DELETE(self):
+        path = self.path.split("?")[0]
+        if "/attach_files/" in path:
+            STATE["assets"] = [a for a in STATE["assets"] if str(a.get("id")) != path.rsplit("/", 1)[1]]
+            return self._json(204, {})
+        return self._json(404, {"message": "no route " + path})
+
     def do_POST(self):
         path = self.path.split("?")[0]
         n = int(self.headers.get("Content-Length") or 0)
@@ -104,7 +113,8 @@ class H(BaseHTTPRequestHandler):
             f = self._fields(body)
             if "file" not in f:
                 return self._json(404, {"message": "Not Found（缺 file）"})
-            STATE["assets"].append({"name": f.get("file:filename", "")})
+            name = f.get("file:filename", "")
+            STATE["assets"].append({"id": len(STATE["assets"]) + 1, "name": name})
             return self._json(201, {"ok": True})
         return self._json(404, {"message": "no route " + path})
 
@@ -147,6 +157,11 @@ SKIPPED="$(echo "$OUT2" | grep -c "已存在，跳过")"
 # token 不对：应给出可读的失败原因，且不是 404 糊过去
 OUT3="$(GITEE_TOKEN=bad-token bash tools/gitee-release.sh "$TAG" "$DIST" 2>&1)"
 echo "$OUT3" | grep -q "token 无效或已过期" && ok "错 token 的提示说得清" || bad "错 token 的提示不明确：$(echo "$OUT3" | tail -2)"
+
+# 替换模式：同名附件先删再传
+printf 'fake2' >"$DIST/clipnest-$VER-macos.zip"
+OUT4="$(GITEE_REPLACE=1 bash tools/gitee-release.sh "$TAG" "$DIST" 2>&1)"
+echo "$OUT4" | grep -q "删旧附件" && ok "GITEE_REPLACE=1 会先删同名附件" || bad "替换模式没删旧附件：$(echo "$OUT4" | grep -c '跳过')"
 
 echo "--------"
 echo "通过 $PASS 项，失败 $FAIL 项"

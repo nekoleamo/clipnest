@@ -45,10 +45,16 @@ fi
 echo "== 归档"
 MAC_APP="$OUT/darwin-universal/clipnest.app"
 [ -d "$MAC_APP" ] || MAC_APP="$(ls -d "$OUT"/darwin-*/clipnest.app | head -1)"
-rm -f "$OUT/clipnest-${VERSION}-macos.zip" "$OUT/clipnest-${VERSION}-windows-x86_64.zip"
-ditto -c -k --sequesterRsrc --keepParent "$MAC_APP" "$OUT/clipnest-${VERSION}-macos.zip"
-if [ -f "$OUT/windows-amd64/clipnest.exe" ]; then
-  (cd "$OUT/windows-amd64" && zip -q -X "../clipnest-${VERSION}-windows-x86_64.zip" clipnest.exe)
+# 注意：ditto 每次打出来的 zip 字节都不一样，重打会让已发布产物的 SHA256 对不上。
+# 所以只有真构建时才归档；SKIP_BUILD=1 复用已有 zip。
+if [ "${SKIP_BUILD:-}" = "1" ] && [ -f "$OUT/clipnest-${VERSION}-macos.zip" ]; then
+  echo "== 复用已有 zip（SKIP_BUILD=1，不重新打包）"
+else
+  rm -f "$OUT/clipnest-${VERSION}-macos.zip" "$OUT/clipnest-${VERSION}-windows-x86_64.zip"
+  ditto -c -k --sequesterRsrc --keepParent "$MAC_APP" "$OUT/clipnest-${VERSION}-macos.zip"
+  if [ -f "$OUT/windows-amd64/clipnest.exe" ]; then
+    (cd "$OUT/windows-amd64" && zip -q -X "../clipnest-${VERSION}-windows-x86_64.zip" clipnest.exe)
+  fi
 fi
 
 echo "== 校验和"
@@ -96,12 +102,6 @@ for f in install.sh install.ps1; do
   chmod +x "$OUT/$f"
 done
 
-echo "== 生成 Gitee 用的变体（URL 指向 gitee 的发行版，供国内 tap/bucket 用）"
-sed -e "s|https://github.com/${OWNER}/${REPO}|https://gitee.com/${GITEE_OWNER}/${GITEE_REPO}|g" \
-  "$OUT/clipnest.cask.rb" >"$OUT/clipnest.gitee.cask.rb"
-sed -e "s|https://github.com/${OWNER}/${REPO}|https://gitee.com/${GITEE_OWNER}/${GITEE_REPO}|g" \
-  "$OUT/clipnest.scoop.json" >"$OUT/clipnest.gitee.scoop.json"
-
 echo "== 生成 Scoop manifest"
 cat >"$OUT/clipnest.scoop.json" <<JSON
 {
@@ -130,6 +130,12 @@ cat >"$OUT/clipnest.scoop.json" <<JSON
   }
 }
 JSON
+echo "== 生成 Gitee 用的变体（URL 指向 gitee 的发行版，供国内 tap/bucket 用）"
+sed -e "s|https://github.com/${OWNER}/${REPO}|https://gitee.com/${GITEE_OWNER}/${GITEE_REPO}|g" \
+  "$OUT/clipnest.cask.rb" >"$OUT/clipnest.gitee.cask.rb"
+sed -e "s|https://github.com/${OWNER}/${REPO}|https://gitee.com/${GITEE_OWNER}/${GITEE_REPO}|g" \
+  "$OUT/clipnest.scoop.json" >"$OUT/clipnest.gitee.scoop.json"
+
 python3 -m json.tool "$OUT/clipnest.scoop.json" >/dev/null || { echo "❌ scoop manifest 不是合法 JSON"; exit 1; }
 
 echo "== 完成"
