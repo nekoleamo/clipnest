@@ -2,6 +2,8 @@
 package app
 
 import (
+	"fmt"
+
 	"github.com/egoist/mygo/ui"
 )
 
@@ -48,6 +50,22 @@ func (a *App) rowMenu(m *ui.Menu, row Row) {
 	}
 
 	m.Separator()
+	// 多选：⌘/Ctrl 点击行勾选（这个菜单里也能全选，省得去记快捷键）
+	marked := len(a.Marked())
+	if marked > 0 {
+		if m.Item(fmt.Sprintf("删除选中的 %d 条", marked)).Shortcut(ui.Cmd, ui.KeyD).Danger().Chosen() {
+			a.DeleteMarked(row, true)
+		}
+		if m.Item("取消勾选").Chosen() {
+			a.ClearMarks()
+		}
+	} else {
+		if m.Item(fmt.Sprintf("全选已加载的 %d 条", len(a.Rows()))).Shortcut(ui.Cmd, ui.KeyA).Chosen() {
+			a.MarkAllLoaded()
+		}
+	}
+
+	m.Separator()
 	m.Submenu("移到分组", func(sub *ui.Menu) {
 		if sub.Item("未分组").Checked(row.GroupID == nil).Chosen() {
 			a.MoveToGroup(row.ID, nil)
@@ -62,7 +80,7 @@ func (a *App) rowMenu(m *ui.Menu, row Row) {
 	})
 
 	m.Separator()
-	if m.Item("删除").Shortcut(ui.Cmd, ui.KeyD).Danger().Chosen() {
+	if m.Item("删除这条").Shortcut(ui.Cmd, ui.KeyD).Danger().Chosen() {
 		a.Remove(row)
 	}
 }

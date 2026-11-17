@@ -23,7 +23,7 @@ func TestRowContextMenu(t *testing.T) {
 	if len(labels) == 0 {
 		t.Fatal("右键没有弹出菜单")
 	}
-	for _, want := range []string{"粘贴", "复制", "置顶", "收藏", "移到分组", "删除"} {
+	for _, want := range []string{"粘贴", "粘贴为纯文本", "复制", "置顶", "收藏", "移到分组", "删除这条"} {
 		found := false
 		for _, l := range labels {
 			if l == want {
@@ -60,7 +60,7 @@ func TestRowContextMenu(t *testing.T) {
 	}
 
 	// 删除：条目被删掉
-	if err := tester.ChooseMenuItem("删除"); err != nil {
+	if err := tester.ChooseMenuItem("删除这条"); err != nil {
 		t.Fatalf("点删除失败：%v", err)
 	}
 	tester.Frame()

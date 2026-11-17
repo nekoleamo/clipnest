@@ -119,6 +119,9 @@ func (a *App) panelView(c *ui.Context) {
 		if total > 0 {
 			footer = fmt.Sprintf("%d/%d · %s", min(sel, total-1)+1, total, hints)
 		}
+		if n := len(a.Marked()); n > 0 {
+			footer = fmt.Sprintf("已选 %d 条 · ⌘D 删除 · Esc 取消 · ", n) + footer
+		}
 		if a.Paused() {
 			footer = "⏸ 已暂停记录 · " + footer
 		}
@@ -272,7 +275,11 @@ func (a *App) bindKeys(root ui.Element, c *ui.Context) {
 		}
 	}
 
-	root.OnShortcut(0, ui.KeyEscape, func() { a.Dismiss() })
+	root.OnShortcut(0, ui.KeyEscape, func() {
+		if !a.ClearMarks() { // 有勾选的先取消勾选，再按一次才收起
+			a.Dismiss()
+		}
+	})
 	root.OnShortcut(0, ui.KeyDown, func() { a.Move(1) })
 	root.OnShortcut(0, ui.KeyUp, func() { a.Move(-1) })
 	root.OnShortcut(0, ui.KeyRight, func() { a.Move(1) })
@@ -283,7 +290,11 @@ func (a *App) bindKeys(root ui.Element, c *ui.Context) {
 	root.OnShortcut(0, ui.KeyPageDown, func() { a.MovePage(1) })
 	root.OnShortcut(ui.Cmd, ui.KeyF, func() { a.FocusSearch() })
 
-	root.OnShortcut(ui.Cmd, ui.KeyD, rowAction(func(r Row) bool { return a.Remove(r) }))
+	root.OnShortcut(ui.Cmd, ui.KeyD, rowAction(func(r Row) bool {
+		a.DeleteMarked(r, true) // 有勾选就删勾选的，否则删当前这条
+		return true
+	}))
+	root.OnShortcut(ui.Cmd, ui.KeyA, func() { a.MarkAllLoaded() })
 	root.OnShortcut(ui.Cmd, ui.KeyP, rowAction(func(r Row) bool { return a.ToggleFlag(r, FlagPinned) }))
 	root.OnShortcut(ui.Cmd, ui.KeyS, rowAction(func(r Row) bool { return a.ToggleFlag(r, FlagFavorite) }))
 	root.OnShortcut(ui.Cmd, ui.KeyE, rowAction(func(r Row) bool { return a.ToggleFlag(r, FlagSensitive) }))
@@ -353,13 +364,28 @@ func (a *App) listView(c *ui.Context) {
 					}
 
 					rowID := row.ID
-					rowEl := ui.Column(c).Key(fmt.Sprintf("row-%d", row.ID)).
+					marked := a.IsMarked(row.ID)
+					if marked && index != sel {
+						bg = th.Surface // 勾上的行给个底色，与选中区分
+					}
+					// 点击/回调都在下一帧跑，所以先声明元素变量，回调里回头读它的 ClickModifiers
+					clicked := func(mods ui.Modifiers) {
+						if mods&ui.Cmd != 0 {
+							a.ToggleMark(rowID)
+						} else {
+							a.Select(index)
+						}
+						a.refocusSearch()
+					}
+					var rowEl ui.Element
+					rowEl = ui.Column(c).Key(fmt.Sprintf("row-%d", row.ID)).
 						Radius(6).
 						Padding(6, 4).
 						Background(bg).
 						OnClick(func() {
-							// 点完之后把焦点还给搜索框：否则方向键会被滚动容器拿去滚列表
-							a.later(func() { a.Select(index); a.refocusSearch() })
+							// ⌘/Ctrl 点击 = 勾选（批量删除用）；普通点击 = 选中
+							mods := rowEl.ClickModifiers()
+							a.later(func() { clicked(mods) })
 						}).
 						// 按住往窗口外拖 = 拖拽导出（文本给纯文本，图片/文件给文件）
 						DragDataFrom(func() transfer.Data { return a.DragData(rowID) })
@@ -384,7 +410,9 @@ func (a *App) listView(c *ui.Context) {
 									ui.Image(c, b).Size(thumbSize, thumbSize).Fit(ui.Contain).Radius(3)
 								}
 							}
-							if index < 9 {
+							if marked {
+								ui.Text(c, "✓").FontSize(10).TextColor(fg)
+							} else if index < 9 {
 								ui.Text(c, Slot(index)).FontSize(9).TextColor(fg)
 							}
 							ui.Text(c, row.Tag).FontSize(10).TextColor(fg)
@@ -398,9 +426,11 @@ func (a *App) listView(c *ui.Context) {
 							if row.Sensitive {
 								mark += "🔒 "
 							}
-							a.summaryText(c, mark+row.Summary, q, fg, th).FontSize(12).TextColor(fg).Grow(1).Ellipsis("…").
+							var sumEl ui.Element
+							sumEl = a.summaryText(c, mark+row.Summary, q, fg, th).FontSize(12).TextColor(fg).Grow(1).Ellipsis("…").
 								OnClick(func() {
-									a.later(func() { a.Select(index); a.refocusSearch() })
+									mods := sumEl.ClickModifiers()
+									a.later(func() { clicked(mods) })
 								}).
 								ContextMenu(func(m *ui.Menu) { a.rowMenu(m, row) })
 							if row.UseCount > 1 {

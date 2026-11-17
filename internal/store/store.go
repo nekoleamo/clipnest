@@ -215,6 +215,21 @@ func (s *Store) Remove(id int64) (bool, error) {
 	return true, nil
 }
 
+// RemoveMany 批量删除（图片资源连带回收），返回真正删掉的条数。
+func (s *Store) RemoveMany(ids []int64) (int, error) {
+	deleted := 0
+	for _, id := range ids {
+		ok, err := s.Remove(id)
+		if err != nil {
+			return deleted, err
+		}
+		if ok {
+			deleted++
+		}
+	}
+	return deleted, nil
+}
+
 // PruneOlderThan 删掉 updated_at 早于 cutoff（RFC3339）的条目；收藏与置顶受保护（契约 9）。
 func (s *Store) PruneOlderThan(cutoff string) (int, error) {
 	rows, err := s.DB.Query(`SELECT id FROM items

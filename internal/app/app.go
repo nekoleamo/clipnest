@@ -136,6 +136,8 @@ type App struct {
 	opens int
 	// paused 为 true 时不再采集（托盘里手动暂停；只在内存里，重启恢复采集）
 	paused bool
+	// marked 是批量操作勾上的条目 id（⌘/Ctrl 点击切换）；刷新列表不丢，删完/唤出清空
+	marked map[int64]bool
 }
 
 // New 建好应用（不启动窗口）。
@@ -914,6 +916,118 @@ const (
 	FlagFavorite
 	FlagSensitive
 )
+
+// 批量标记（多选删除用）。
+
+// IsMarked 报告某条是否被标记。
+func (a *App) IsMarked(id int64) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.marked[id]
+}
+
+// Marked 返回已标记的 id（按列表顺序，方便状态文案）。
+func (a *App) Marked() []int64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.marked) == 0 {
+		return nil
+	}
+	out := make([]int64, 0, len(a.marked))
+	for _, row := range a.rows {
+		if a.marked[row.ID] {
+			out = append(out, row.ID)
+		}
+	}
+	return out
+}
+
+// ToggleMark 切换一条的标记状态。
+func (a *App) ToggleMark(id int64) {
+	a.mu.Lock()
+	if a.marked == nil {
+		a.marked = map[int64]bool{}
+	}
+	if a.marked[id] {
+		delete(a.marked, id)
+	} else {
+		a.marked[id] = true
+	}
+	n := len(a.marked)
+	a.mu.Unlock()
+	if n > 0 {
+		a.SetStatus(fmt.Sprintf("已选 %d 条 · ⌘D 删除 · Esc 取消", n))
+	} else {
+		a.SetStatus("")
+	}
+	a.invalidate()
+}
+
+// MarkAllLoaded 标记当前已加载的所有行；已经有标记时再按一次就取消全选。
+func (a *App) MarkAllLoaded() {
+	a.mu.Lock()
+	if len(a.marked) > 0 {
+		a.marked = nil
+		a.mu.Unlock()
+		a.SetStatus("")
+		a.invalidate()
+		return
+	}
+	a.marked = make(map[int64]bool, len(a.rows))
+	for _, row := range a.rows {
+		a.marked[row.ID] = true
+	}
+	n := len(a.marked)
+	a.mu.Unlock()
+	if n > 0 {
+		a.SetStatus(fmt.Sprintf("已全选 %d 条 · ⌘D 删除 · Esc 取消", n))
+	}
+	a.invalidate()
+}
+
+// ClearMarks 清掉所有标记；返回是否真的清过（Esc 用：有标记就先取消标记，不收起面板）。
+func (a *App) ClearMarks() bool {
+	a.mu.Lock()
+	had := len(a.marked) > 0
+	a.marked = nil
+	a.mu.Unlock()
+	if had {
+		a.SetStatus("")
+		a.invalidate()
+	}
+	return had
+}
+
+// DeleteMarked 删掉所有被标记的条目；没有标记时删 fallback 那一行。
+func (a *App) DeleteMarked(fallback Row, hasFallback bool) int {
+	ids := a.Marked()
+	multi := len(ids) > 1
+	if len(ids) == 0 {
+		if !hasFallback {
+			return 0
+		}
+		ids = []int64{fallback.ID}
+	}
+	n, err := a.Store.RemoveMany(ids)
+	if err != nil {
+		logf("REMOVE MANY failed n=%d: %v", len(ids), err)
+		a.SetStatus("❌ " + err.Error())
+		return 0
+	}
+	a.mu.Lock()
+	a.marked = nil
+	a.mu.Unlock()
+	a.Refresh()
+	switch {
+	case n == 0:
+		a.SetStatus("没有删掉任何条目")
+	case multi:
+		a.SetStatus(fmt.Sprintf("已删除 %d 条", n))
+	default:
+		a.SetStatus("已删除")
+	}
+	return n
+}
 
 // ToggleFlag 切换置顶/收藏/敏感。契约 6：这类改动不刷新 updated_at。
 func (a *App) ToggleFlag(row Row, flag Flag) bool {
