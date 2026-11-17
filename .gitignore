@@ -14,6 +14,9 @@ legacy-rust/target
 .DS_Store
 *.app
 
+# 本机工具产物（go run ./cmd/uishot 会生成，不入库免得渲染结果过期）
+/uishot
+
 # 日志与临时产物
 *.log
 

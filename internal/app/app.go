@@ -132,8 +132,6 @@ type App struct {
 	// lastSync/lastSyncVia 是最近一次成功的同步时间与入口
 	lastSync    string
 	lastSyncVia string
-	// opens 是打开次数，面板据此判断「又开了一次」要不要重置查询。
-	opens int
 	// paused 为 true 时不再采集（托盘里手动暂停；只在内存里，重启恢复采集）
 	paused bool
 	// marked 是批量操作勾上的条目 id（⌘/Ctrl 点击切换）；刷新列表不丢，删完/唤出清空
@@ -1265,7 +1263,6 @@ func (a *App) TogglePanel() {
 // 都会跨「收起→再唤出」留着；不清的话再次呼出看到的就是上次退出时的样子。
 func (a *App) ResetPanelState() {
 	a.mu.Lock()
-	a.opens++
 	a.query = ""
 	a.sel = 0
 	a.limit = PageSize
