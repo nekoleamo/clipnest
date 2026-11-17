@@ -246,7 +246,12 @@ func (a *App) filterBar(c *ui.Context, l panelLayout) ui.Element {
 			}
 		}
 		if l.showCount {
-			ui.Text(c, fmt.Sprintf("共 %d 条", len(a.Rows()))).FontSize(10).TextColor(th.TextMuted)
+			total := a.Total()
+			label := fmt.Sprintf("共 %d 条", total)
+			if loaded := len(a.Rows()); a.HasMore() || int64(loaded) < total {
+				label = fmt.Sprintf("共 %d 条（已加载 %d）", total, loaded)
+			}
+			ui.Text(c, label).FontSize(10).TextColor(th.TextMuted)
 		}
 		// 剩下的空白当窗口拖拽把手（比手指还好用，且点不到任何控件）
 		ui.Box(c).Grow(1).FillHeight().DragWindow()
@@ -394,6 +399,11 @@ func (a *App) listView(c *ui.Context) {
 							ui.Text(c, row.Time).FontSize(9).TextColor(fg)
 						})
 					})
+				}
+				// 滚到底就再取一页：hasMore 由 Refresh 多取一条判断，取完自动停
+				if a.HasMore() && a.listViewH > 0 && a.ListScroll.MaxY > 0 &&
+					a.ListScroll.Y >= a.ListScroll.MaxY-8 {
+					a.later(func() { a.LoadMore() })
 				}
 				if len(rows) > 0 && a.takeScrollToSelection() {
 					a.scrollSelectionIntoView(selTop, selH)

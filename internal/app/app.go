@@ -56,13 +56,18 @@ type App struct {
 	Settings settings.Settings
 	Guard    *clip.Guard
 
-	mu      sync.Mutex
-	panel   *mygo.Window
-	prefs   *mygo.Window
-	tray    *mygo.Tray
-	rows    []Row
-	sel     int
-	query   string
+	mu    sync.Mutex
+	panel *mygo.Window
+	prefs *mygo.Window
+	tray  *mygo.Tray
+	rows  []Row
+	sel   int
+	query string
+	// limit 是列表当前取到第几页（每次+PageSize）；hasMore 表示库里还有更多；
+	// total 是当前查询条件下的总条数（顶栏「共 N 条」用它，不是已加载数）
+	limit   int
+	hasMore bool
+	total   int64
 	status  string
 	syncMsg string
 	visible bool
@@ -235,9 +240,14 @@ func (a *App) Refresh() {
 	a.mu.Lock()
 	q := a.query
 	filter := a.currentFilterLocked()
+	limit := a.limit
+	if limit < PageSize {
+		limit = PageSize
+	}
 	a.mu.Unlock()
 
-	items, err := db.Query(a.Store.DB, q, filter, db.Page{Limit: PageSize})
+	// 多取一条：取回来比 limit 多，说明还有下一页
+	items, err := db.Query(a.Store.DB, q, filter, db.Page{Limit: int64(limit) + 1})
 	if err != nil {
 		logf("QUERY ERROR %v", err)
 		a.SetStatus("❌ 读库失败：" + err.Error())
@@ -252,6 +262,16 @@ func (a *App) Refresh() {
 		byID[g.ID] = g.Name
 	}
 
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+	total, err := db.CountQuery(a.Store.DB, q, filter)
+	if err != nil {
+		logf("COUNT ERROR %v", err)
+		total = int64(len(items))
+	}
+
 	rows := make([]Row, 0, len(items))
 	for _, item := range items {
 		row := a.rowOf(item)
@@ -264,6 +284,9 @@ func (a *App) Refresh() {
 	a.mu.Lock()
 	a.rows = rows
 	a.groups = groups
+	a.limit = limit
+	a.hasMore = hasMore
+	a.total = total
 	if a.sel >= len(rows) {
 		a.sel = max(0, len(rows)-1)
 	}
@@ -310,6 +333,7 @@ func (a *App) SetKindFilter(kind int) {
 	a.mu.Lock()
 	a.kindFilter = kind
 	a.sel = 0
+	a.limit = PageSize
 	a.mu.Unlock()
 	a.Refresh()
 }
@@ -319,6 +343,7 @@ func (a *App) SetGroupFilter(name string) {
 	a.mu.Lock()
 	a.groupFilter = name
 	a.sel = 0
+	a.limit = PageSize
 	a.mu.Unlock()
 	a.Refresh()
 }
@@ -342,6 +367,7 @@ func (a *App) SetQuery(q string) {
 	a.mu.Lock()
 	a.query = q
 	a.sel = 0
+	a.limit = PageSize
 	a.mu.Unlock()
 	a.Refresh()
 }
@@ -566,6 +592,39 @@ func (a *App) Rows() []Row {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return append([]Row(nil), a.rows...)
+}
+
+// Total 是当前查询条件下的总条数（不是已加载条数）。
+func (a *App) Total() int64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.total > 0 {
+		return a.total
+	}
+	return int64(len(a.rows))
+}
+
+// HasMore 报告库里还有没有下一页。
+func (a *App) HasMore() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.hasMore
+}
+
+// LoadMore 再取一页（列表滚到底时调用）；已取完就什么都不做。
+//
+// 返回是否真的加载了，调用方据此决定要不要继续问。
+func (a *App) LoadMore() bool {
+	a.mu.Lock()
+	if !a.hasMore {
+		a.mu.Unlock()
+		return false
+	}
+	a.limit += PageSize
+	a.mu.Unlock()
+	logf("PAGE load more limit=%d", a.limit)
+	a.Refresh()
+	return true
 }
 
 // Selection 返回当前选中下标与总数。
@@ -984,6 +1043,8 @@ func (a *App) ResetPanelState() {
 	a.opens++
 	a.query = ""
 	a.sel = 0
+	a.limit = PageSize
+	a.hasMore = false
 	a.visible = true
 	a.status = ""
 	a.syncMsg = ""
