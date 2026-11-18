@@ -321,7 +321,10 @@ func (a *App) prefsView(c *ui.Context) {
 				label(c, "对端缺历史时（换过库 / 旧版本覆盖写过 / 包过期）用这个补齐", th)
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					if ui.Button(c, "重新推送全部历史…").Clicked() {
-						f.status = a.RepushAllHistory()
+						f.status = "" // 过程与结果都在下面那行同步状态里，别在这儿留一条
+						if msg := a.RepushAllHistory(); msg != "" {
+							f.status = msg
+						}
 					}
 					ui.Text(c, fmt.Sprintf("本机 %d 条", a.Total())).FontSize(11).TextColor(th.TextMuted)
 				})

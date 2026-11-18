@@ -17,14 +17,17 @@ const syncRunningMsg = "🔄 正在同步中…"
 // 什么时候需要：对端在某一包上漏了 —— 旧版本把增量覆盖写、包过了保留期被删、
 // 本机换过库、或者对端刚装好而本机早就在同步（水位早就走过那些条目的时间戳）。
 // 重推是幂等的，对端按时间戳判新旧；图片走 synced_blobs 台账，不会重新上传原图。
+// 成功时返回空串：过程与结果都写在同步状态那一行上（点完先显示「正在同步中」，
+// 跑完换成 ✅/❌）。以前这里返回一句「已安排…（同步中…）」，它是设置窗自己的
+// status，没人会去清，于是一直挂在那儿看着像还在同步。
 func (a *App) RepushAllHistory() string {
 	if err := clipsync.ResetExportWatermark(a.Store.DB); err != nil {
 		logf("SYNC repush reset failed: %v", err)
 		return "❌ 重置推送水位失败：" + err.Error()
 	}
 	logf("SYNC repush：已清掉导出水位，下一轮推全量")
-	a.StartSync()
-	return "已安排重新推送全部历史（同步中…）"
+	a.startSyncWith("🔄 正在同步中…（重新推送全部历史）")
+	return ""
 }
 
 // syncOnce 可注入（测试里用假实现，不然会真去连 NAS）。
@@ -34,9 +37,12 @@ var syncOnce = clipsync.RunOnce
 //
 // 状态是**同步**改的：先把上一轮的 ✅/❌/⚠️ 换成「正在同步中」，再起 worker。
 // 不这么做的话，点完「立即同步」界面上还挂着上一次的报错，看着像又失败了。
-func (a *App) StartSync() {
+func (a *App) StartSync() { a.startSyncWith(syncRunningMsg) }
+
+// startSyncWith 是 StartSync 带一句自定义的「进行中」文案（重推历史用得上）。
+func (a *App) startSyncWith(running string) {
 	clipsync.ResetEndpointCache() // 手动同步：重新探一次局域网/Tailscale
-	a.setSyncStatus(syncRunningMsg)
+	a.setSyncStatus(running)
 	go a.runSync(true)
 }
 
@@ -121,9 +127,8 @@ func (a *App) runSync(loud bool) {
 		}
 		return
 	}
-	if loud {
-		a.setSyncStatus(syncRunningMsg)
-	}
+	// 这里不再重写「正在同步中」：StartSync/startSyncWith 在起 worker 之前就写好了，
+	// 再写一遍会把「（重新推送全部历史）」这类补充说明盖掉。
 	report, err := syncOnce(a.Store.DB, cfg, a.Paths)
 	if err != nil {
 		logf("SYNC ERROR %v", err)

@@ -652,9 +652,12 @@ func TestRepushAllHistoryExportsEverythingAgain(t *testing.T) {
 		t.Fatalf("水位刚推完，增量应当是 0 条，实际 %d", len(changes))
 	}
 
-	// 点「重新推送全部历史」→ 水位被清掉
-	if msg := a.RepushAllHistory(); !strings.Contains(msg, "重新推送") {
-		t.Fatalf("提示不对：%q", msg)
+	// 点「重新推送全部历史」→ 水位被清掉，且不往设置窗那行留永久提示
+	if msg := a.RepushAllHistory(); msg != "" {
+		t.Fatalf("成功时不该返回提示（过程与结果都在同步状态那行）：%q", msg)
+	}
+	if got := a.SyncStatus(); !strings.Contains(got, "重新推送全部历史") {
+		t.Fatalf("同步状态里该说明这是重推：%q", got)
 	}
 	changes, err = sync.ExportChanges(a.Store.DB, mustWatermark(t, a))
 	if err != nil {
@@ -677,4 +680,45 @@ func mustWatermark(t *testing.T, a *App) *string {
 		t.Fatal(err)
 	}
 	return &at
+}
+
+// TestRepushButtonLeavesNoStaleStatus 点「重新推送全部历史」后，设置窗那行不能一直挂着
+// 「已安排…（同步中…）」—— 以前它写在 f.status 里，没人清，看着像永远在同步。
+func TestRepushButtonLeavesNoStaleStatus(t *testing.T) {
+	a := newTestApp(t)
+	release := make(chan struct{})
+	oldOnce := syncOnce
+	syncOnce = func(*sql.DB, sync.Config, paths.Paths) (sync.SyncReport, error) {
+		<-release
+		return sync.SyncReport{Pushed: 1, Endpoint: "局域网"}, nil
+	}
+	t.Cleanup(func() { syncOnce = oldOnce })
+
+	tt := ui.NewTester(a.PrefsView, 620, 720)
+	tt.Frame()
+	tt.Scroll(300, 300, 0, 1000)
+	tt.Frame()
+	if err := tt.Click("重新推送全部历史…"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if got := a.PrefsForm().status; got != "" {
+		t.Fatalf("设置窗那行不该留提示，实际 %q", got)
+	}
+	if !hasText(tt, "重新推送全部历史") {
+		t.Fatal("同步状态行应当说明这是重推")
+	}
+
+	close(release)
+	deadline := time.Now().Add(3 * time.Second)
+	for a.syncBusy.Load() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	tt.Frame()
+	if hasText(tt, "正在同步中") {
+		t.Fatal("同步完成后不该还显示「正在同步中」")
+	}
+	if got := a.PrefsForm().status; got != "" {
+		t.Fatalf("跑完也不该留提示，实际 %q", got)
+	}
 }
