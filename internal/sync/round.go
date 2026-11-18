@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"clipnest/internal/backup"
@@ -186,23 +187,24 @@ func syncRound(db *sql.DB, transport Transport, deviceID string, p paths.Paths, 
 		}
 		sealed, err := transport.Get(name)
 		if err != nil {
-			Logf("SYNC skip %s: %v", name, err)
+			logSkipOnce(name, fmt.Sprintf("%v", err))
 			continue
 		}
 		plain, err := decode(sealed)
 		if err != nil {
-			Logf("SYNC skip %s: 解密失败", name)
+			logSkipOnce(name, "解密失败（两端的加密口令不一致？）")
 			continue
 		}
 		pkg, err := UnmarshalPackage(plain)
 		if err != nil {
-			Logf("SYNC skip %s: %v", name, err)
+			logSkipOnce(name, fmt.Sprintf("%v", err))
 			continue
 		}
 		if pkg.Version != FormatVersion {
-			Logf("SYNC skip %s: 版本 %d 不支持", name, pkg.Version)
+			logSkipOnce(name, fmt.Sprintf("版本 %d 不支持", pkg.Version))
 			continue
 		}
+		skipLogged.Delete(name) // 这一包能读了，以后再有新错就立刻记
 		report.Pulled += len(pkg.Changes)
 		applied, err := ApplyChanges(db, pkg.Changes)
 		if err != nil {
@@ -224,6 +226,25 @@ func syncRound(db *sql.DB, transport Transport, deviceID string, p paths.Paths, 
 	//    删的原因是文件名不再覆盖，长期用下来会越攒越多。
 	cleanupOwnPackages(transport, deviceID, names)
 	return report, nil
+}
+
+// skipLogged 记「某个包上次为什么被跳过」的时刻，用来给日志节流。
+var skipLogged sync.Map
+
+// logSkipOnce 同一个包同类错误最多 10 分钟记一次。
+//
+// 对端口令不对时这一包每 5 秒就会被重试一次；不节流的话日志两小时就能刷满 2MB
+// 把有用的记录轮转掉（实测一天几百条一样的「解密失败」）。
+func logSkipOnce(name, reason string) {
+	key := name + "|" + reason
+	now := time.Now()
+	if last, ok := skipLogged.Load(key); ok {
+		if t, ok := last.(time.Time); ok && now.Sub(t) < 10*time.Minute {
+			return
+		}
+	}
+	skipLogged.Store(key, now)
+	Logf("SYNC skip %s: %s", name, reason)
 }
 
 // cleanupOwnPackages 删掉本机超过保留期的增量包。
