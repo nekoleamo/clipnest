@@ -1,10 +1,13 @@
 package app
 
 import (
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
 
+	"clipnest/internal/backup"
 	"clipnest/internal/settings"
 	"clipnest/internal/sync"
 	"clipnest/internal/update"
@@ -397,4 +400,88 @@ func TestShortcutRecorderCancelsOnClickElsewhere(t *testing.T) {
 	if got := (*calls)[len(*calls)-1]; got != "register "+before {
 		t.Fatalf("取消后应当把原快捷键挂回去，最后一步是 %q", got)
 	}
+}
+
+// TestClearAllBacksUpFirst 清空前必须先导一份加密备份；没口令就**不清**。
+//
+// 清空不可撤销，墓碑还会随同步推到别的设备，所以留一份能导回来的备份是底线。
+func TestClearAllBacksUpFirst(t *testing.T) {
+	a := newTestApp(t)
+	record(t, a, "要清掉的条目")
+
+	if msg := a.ClearAllHistoryWithBackup(""); !strings.Contains(msg, "没有清空") {
+		t.Fatalf("没口令应当拒绝清空，实际提示 %q", msg)
+	}
+	if len(a.Rows()) != 1 {
+		t.Fatal("没口令时不该清掉任何条目")
+	}
+	if files, _ := filepath.Glob(filepath.Join(a.Paths.BackupsDir(), "*.cnbak")); len(files) != 0 {
+		t.Fatalf("没口令时不该产生备份，实际 %v", files)
+	}
+
+	msg := a.ClearAllHistoryWithBackup("pw-123456")
+	if len(a.Rows()) != 0 {
+		t.Fatalf("应当清空，实际还剩 %d 条（%s）", len(a.Rows()), msg)
+	}
+	files, _ := filepath.Glob(filepath.Join(a.Paths.BackupsDir(), "*.cnbak"))
+	if len(files) != 1 {
+		t.Fatalf("应当产出一份 .cnbak，实际 %v（提示 %q）", files, msg)
+	}
+	// 备份要真能导回来，否则「兜底」只是句空话
+	report, err := backup.Import(a.Store.DB, files[0], "pw-123456")
+	if err != nil {
+		t.Fatalf("备份导不回来：%v", err)
+	}
+	if report.Inserted != 1 {
+		t.Fatalf("备份里应当有那 1 条，实际 %+v", report)
+	}
+	a.Refresh()
+	if len(a.Rows()) != 1 {
+		t.Fatalf("导回来之后列表应当有 1 条，实际 %d", len(a.Rows()))
+	}
+}
+
+// TestPrefsClearAllNeedsWord 清空要点两下、输入「清空」、且先填口令，确认按钮才可点。
+func TestPrefsClearAllNeedsWord(t *testing.T) {
+	a := newTestApp(t)
+	record(t, a, "别手滑清掉的条目")
+	tt := ui.NewTester(a.PrefsView, 620, 720)
+	tt.Frame()
+	tt.Frame()
+
+	if err := tt.Click("清空全部历史…"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !a.ClearConfirming() {
+		t.Fatal("点第一下应当进入确认态")
+	}
+	if !disabled(tt, "确认清空（先自动备份）") {
+		t.Fatal("没输入解锁词、也没口令时确认按钮应当禁用")
+	}
+
+	a.PrefsForm().clearWord = "清空"
+	tt.Frame()
+	if !disabled(tt, "确认清空（先自动备份）") {
+		t.Fatal("只输入解锁词、没有口令时仍然应当禁用（清空前要先备份）")
+	}
+
+	a.PrefsForm().passphrase = "pw-123456"
+	tt.Frame()
+	if disabled(tt, "确认清空（先自动备份）") {
+		t.Fatal("解锁词 + 口令都有了，确认按钮应当可点")
+	}
+	if len(a.Rows()) != 1 {
+		t.Fatal("还没点确认就清了")
+	}
+}
+
+// disabled 读某个名字的无头控件的禁用状态（找不到就当没禁用）。
+func disabled(tt *ui.Tester, name string) bool {
+	for _, n := range tt.AccessAll() {
+		if n.Name == name {
+			return n.Disabled
+		}
+	}
+	return false
 }

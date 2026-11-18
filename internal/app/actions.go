@@ -10,6 +10,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/transfer"
 
+	"clipnest/internal/backup"
 	"clipnest/internal/clip"
 	"clipnest/internal/db"
 	"clipnest/internal/model"
@@ -385,6 +386,22 @@ func (a *App) ClearAllHistory() string {
 	}
 	logf("CLEAR ALL deleted=%d", n)
 	return a.reportStatus(fmt.Sprintf("✅ 已清空 %d 条历史", n))
+}
+
+// ClearAllHistoryWithBackup 先导一份加密备份到 <数据目录>/backups/，再清空全部历史。
+//
+// 清空是不可撤销的（墓碑还会随同步推给别的设备，别的机器也跟着没），所以没口令
+// 就不备份、也不清空：宁可让用户先填个口令，也不要一次手滑把整库抹掉。
+func (a *App) ClearAllHistoryWithBackup(passphrase string) string {
+	if passphrase == "" {
+		return "⚠️ 没填口令，没法先备份，所以没有清空"
+	}
+	path, err := backup.ExportTo(a.Store.DB, a.Paths, passphrase)
+	if err != nil {
+		logf("CLEAR ALL backup failed: %v", err)
+		return "❌ 备份失败，没有清空：" + err.Error()
+	}
+	return "已备份 " + baseName(path) + " · " + a.ClearAllHistory()
 }
 
 // reportStatus 把文案写进底栏并原样返回（设置窗自己那行提示要用）。

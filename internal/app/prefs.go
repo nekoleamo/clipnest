@@ -36,6 +36,9 @@ type prefsForm struct {
 	recordHint string // 录制中途的提醒（比如「要带 ⌘/⌃/⌥/⇧」）
 	pruneDays  float64
 
+	// 清空全部的解锁词（输入「清空」才让确认按钮变成可点）
+	clearWord string
+
 	// 过滤与导出
 	ignoreSensitive bool
 	sensitiveApps   string
@@ -243,18 +246,28 @@ func (a *App) prefsView(c *ui.Context) {
 						f.status = a.PruneOlderThanDays(int(f.pruneDays))
 					}
 				})
+				// 清空是唯一不可撤销的操作：要点两下、输入「清空」、而且必须先备份
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					if a.ClearConfirming() {
-						if ui.Button(c, "再点一次确认清空全部").Clicked() {
-							f.status = a.ClearAllHistory()
+						ui.TextInput(c, &f.clearWord).Placeholder("输入 清空").Width(110)
+						confirm := ui.Button(c, "确认清空（先自动备份）")
+						confirm.Disabled(f.clearWord != "清空" || f.passphrase == "")
+						if confirm.Clicked() {
+							f.status = a.ClearAllHistoryWithBackup(f.passphrase)
+							f.clearWord = ""
 						}
 						if ui.Button(c, "取消").Clicked() {
+							f.clearWord = ""
 							a.CancelClearAll()
 						}
 					} else if ui.Button(c, "清空全部历史…").Clicked() {
+						f.clearWord = ""
 						a.AskClearAll()
 					}
 				})
+				if a.ClearConfirming() && f.passphrase == "" {
+					label(c, "⚠️ 清空前会先导一份加密备份到 backups/，请先在下面「同步」里填口令", th)
+				}
 
 				label(c, "敏感应用白名单（每行一个 bundle id / 进程名；留空用内置表）", th)
 				ui.TextArea(c, &f.sensitiveApps).Height(90)
