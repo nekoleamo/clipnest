@@ -100,8 +100,10 @@ func UpdateMeta(db *sql.DB, id int64, patch MetaPatch) error {
 	} else if patch.ClearGroup {
 		set("group_id", nil)
 	}
-	// 契约 6：不刷新 updated_at（列表顺序不变）；但要让同步知道这条元数据变了
-	set("meta_at", model.Now())
+	// 契约 6：不刷新 updated_at（列表顺序不变）；但要让同步知道这条元数据变了。
+	// meta_at 必须严格大于本条的 updated_at / meta_at：同一毫秒里「插入」再「改元数据」
+	// 会打平，对端 merge 认作「不比本地新」→ 这次改动永远出不了本机（实测过）。
+	set("meta_at", nextMetaAt(db, id))
 	values = append(values, id)
 
 	_, err := db.Exec(fmt.Sprintf("UPDATE items SET %s WHERE id = ?", joinComma(sets)), values...)
@@ -314,4 +316,18 @@ func joinComma(parts []string) string {
 		out += p
 	}
 	return out
+}
+
+// nextMetaAt 是这次元数据改动要写的时间戳：一定严格晚于本条现存的
+// updated_at 与 meta_at（时间戳只到毫秒，打平就等于丢改动）。
+func nextMetaAt(db *sql.DB, id int64) string {
+	var floor string
+	if err := db.QueryRow("SELECT COALESCE(max(updated_at, meta_at), '') FROM items WHERE id = ?", id).Scan(&floor); err != nil {
+		return model.Now()
+	}
+	now := model.Now()
+	if floor != "" && now <= floor {
+		return model.After(floor)
+	}
+	return now
 }

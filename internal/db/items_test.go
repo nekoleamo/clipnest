@@ -198,3 +198,42 @@ func TestDeleteRemovesRowAndFTS(t *testing.T) {
 		t.Fatalf("FTS 条目没删掉：%d", n)
 	}
 }
+
+// TestUpdateMetaTimestampStrictlyAdvances 元数据时间戳必须严格前进。
+//
+// 时间戳只到毫秒：同一个毫秒里「插入」再「改元数据」时 meta_at 会和 updated_at 打平，
+// 同步那边按「谁更新」比较时就会当成本地不旧 → 这次改动永远出不了本机
+// （internal/sync 的 TestMetaChangeReachesOtherDevice 因此十次里挂四五次）。
+func TestUpdateMetaTimestampStrictlyAdvances(t *testing.T) {
+	database := openTest(t)
+	times := func(id int64) (updated, meta string) {
+		t.Helper()
+		if err := database.QueryRow("SELECT updated_at, meta_at FROM items WHERE id = ?", id).Scan(&updated, &meta); err != nil {
+			t.Fatalf("读时间戳失败：%v", err)
+		}
+		return updated, meta
+	}
+	// 连做多轮：每轮都紧挨着插入就改元数据，尽量踩在同一毫秒上
+	for i := 0; i < 20; i++ {
+		res, err := Upsert(database, model.NewText("同一毫秒里插入再改元数据 "+time.Now().Format("150405.000000")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		wasUpdated, wasMeta := times(res.ID)
+		yes := true
+		if err := UpdateMeta(database, res.ID, MetaPatch{Pinned: &yes}); err != nil {
+			t.Fatal(err)
+		}
+		gotUpdated, gotMeta := times(res.ID)
+		floor := wasUpdated
+		if wasMeta > floor {
+			floor = wasMeta
+		}
+		if gotMeta <= floor {
+			t.Fatalf("第 %d 轮 meta_at 没前进：%s（应当晚于 %s）", i, gotMeta, floor)
+		}
+		if gotUpdated != wasUpdated {
+			t.Fatalf("第 %d 轮改了元数据却动了排序时间：%q → %q", i, wasUpdated, gotUpdated)
+		}
+	}
+}

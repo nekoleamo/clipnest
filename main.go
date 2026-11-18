@@ -94,7 +94,7 @@ func main() {
 				return // 退出流程里要真的关掉
 			}
 			e.PreventDefault()
-			prefs.Hide() // 关掉设置窗只是隐藏，下次还能打开
+			a.HidePrefs() // 关掉设置窗只是隐藏，下次还能打开（顺手收尾快捷键录制）
 		})
 		a.SetPrefsWindow(prefs)
 

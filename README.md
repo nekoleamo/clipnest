@@ -44,7 +44,7 @@ irm https://gitee.com/null_593_5354/clipnest/raw/main/install.ps1 | iex
 
 ```bash
 go build ./...                   # 编译
-go test ./...                    # 测试（174 项）
+go test ./...                    # 测试（181 项）
 go vet ./...
 GOOS=windows go build ./...      # Windows 交叉编译
 go tool mygo build               # 打包 .app 与 dmg

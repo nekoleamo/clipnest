@@ -41,7 +41,7 @@ docs/            路线图、执行计划、验证记录
 
 1. `docs/路线图.md` 第四节的 **12 条行为契约**在 Go 侧必须逐条成立，改一条要重开评估
 2. `internal/db` 的迁移脚本**只追加**，已发布脚本不可改。步骤现在是 `func(*sql.Tx) error`：纯 SQL 用 `sqlMigration(...)`，**加列类迁移必须先 `hasColumn` 再 ALTER**（SQLite 没有 `ADD COLUMN IF NOT EXISTS`，重跑会炸——`TestMigrateAdvancesVersionAndKeepsData` 会退化重跑一遍迁移）
-2b. **元数据与同步**：契约 6 规定置顶/收藏/敏感/备注/分组**不刷新 `updated_at`**，所以增量同步另看 `items.meta_at`（迁移 v3）。新增任何「改了但不该动排序」的字段，要同时写 `meta_at`，否则那项改动永远出不了本机
+2b. **元数据与同步**：契约 6 规定置顶/收藏/敏感/备注/分组**不刷新 `updated_at`**，所以增量同步另看 `items.meta_at`（迁移 v3）。新增任何「改了但不该动排序」的字段，要同时写 `meta_at`，否则那项改动永远出不了本机。**`meta_at` 还必须严格大于本条原来的 `updated_at`/`meta_at`**（`db.nextMetaAt`）：时间戳只到毫秒，同一毫秒里插入再改元数据会打平，对端 merge 认作「不比本地新」→ 改动静默丢失
 3. `content_hash = blake3("<kind>:<content>")`；去重命中只 `use_count + 1` 并刷新 `updated_at`
 4. 搜索：长词走 FTS5，**trigram 查询词 <3 字符必须降级 `LIKE`**（2 个汉字命中不了）
 5. 自身写回必须被 guard 抑制，不产生新记录
@@ -80,6 +80,8 @@ docs/            路线图、执行计划、验证记录
 25. **`a.later()` 排的活只有 `runPending()` 会跑，而它以前只在「面板视图」的帧末被调用**：设置窗/预览窗里排的动作（切更新源、检查更新、点预览窗关闭）以前压根不执行——按钮点了毫无反应、也不报错。每个 `ui.View` 入口的帧末都要调一次 `a.runPending()`
 26. **`TrayOptions.Title` 在 macOS 是画在图标旁边的文字，不是 tooltip**：既给 `Icon` 又给 `Title: "❐"`，菜单栏里就会出现两个「图标」（实测被当成重复图标报 bug）。只要图标就别填 `Title`，提示文字用 `ToolTip`
 27. **设置窗内容比窗口高得多（≈1350pt），滚动条默认只在悬停时出现**：`ui.Scroll(...).KeepScrollbars(true)`，否则用户根本不知道下面还有「同步 / 分组 / 备份 / 开机启动」几节（`uishot -prefs` 出图能直接看出这点）
+28. **录快捷键要靠 `Element.HandleInput`，别用输入框**：输入框会把带 ⌘ 的组合当文本编辑命令吃掉，用户还得手打 `CmdOrCtrl+Shift+V` 这种语法。做法是 `ui.Row(...).Focusable().HandleInput(...)`（带 ⌘/⌃/⌥/⇧ 或 F1–F12 才算组合键，见 `AcceleratorFromInput`），点一下进入录制态、Esc/点别处退出。**录制期间要把当前全局快捷键摘掉**，否则按到旧组合时 Carbon 照样触发、面板被唤出，录制框根本收不到键；退出（含关窗、重开）一定要挂回去
+29. **`mygo.GlobalShortcut.Register` 在 headless 测试里会永久卡住**：它把活投给主线程再等回音，测试进程没有事件循环在跑。`registerShortcut`/`unregisterShortcut` 这两个包级变量就是给测试替的（`fakeShortcuts`）
 
 ## 每轮收尾
 

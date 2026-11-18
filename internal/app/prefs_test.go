@@ -232,3 +232,169 @@ func checked(tt *ui.Tester, name string) bool {
 	}
 	return false
 }
+
+// fakeShortcuts 替掉真实的全局快捷键注册（headless 下调 mygo 会等主线程，直接卡死）。
+func fakeShortcuts(t *testing.T) *[]string {
+	t.Helper()
+	var calls []string
+	oldReg, oldUnreg := registerShortcut, unregisterShortcut
+	registerShortcut = func(acc string, _ func()) error {
+		calls = append(calls, "register "+acc)
+		return nil
+	}
+	unregisterShortcut = func(acc string) { calls = append(calls, "unregister "+acc) }
+	t.Cleanup(func() { registerShortcut, unregisterShortcut = oldReg, oldUnreg })
+	return &calls
+}
+
+// TestShortcutRecorderTakesKeyCombo 点一下录制框、再按 ⌘⇧K，快捷键就改成它（不用手打字符串）。
+func TestShortcutRecorderTakesKeyCombo(t *testing.T) {
+	calls := fakeShortcuts(t)
+	a, tt := newPrefsTester(t)
+
+	if err := tt.Click(HotkeyText(a.Settings.Shortcut)); err != nil {
+		t.Fatalf("点不到快捷键框：%v", err)
+	}
+	tt.Frame()
+	if !a.PrefsForm().recording {
+		t.Fatal("点一下应当进入录制态")
+	}
+	// 录制一开始就要把旧键摘掉，否则按到它面板会被唤出、录制框收不到键
+	if got := (*calls)[len(*calls)-1]; got != "unregister "+a.Settings.Shortcut {
+		t.Fatalf("录制开始时应当先摘掉旧快捷键，最后一步是 %q", got)
+	}
+
+	tt.Key(ui.Shift|ui.Super, ui.KeyK)
+	tt.Frame()
+	if got := a.Settings.Shortcut; got != "Super+Shift+K" {
+		t.Fatalf("录制没生效：%q", got)
+	}
+	if settings.Load(a.Paths).Shortcut != "Super+Shift+K" {
+		t.Fatal("新快捷键没落盘")
+	}
+	if a.PrefsForm().recording {
+		t.Fatal("录完应当退出录制态")
+	}
+	if got := a.PrefsForm().shortcut; got != "Super+Shift+K" {
+		t.Fatalf("框里应当显示新组合，实际 %q", got)
+	}
+}
+
+// TestShortcutRecorderEscapeCancels 录制时按 Esc 取消，快捷键保持原样并重新挂上。
+func TestShortcutRecorderEscapeCancels(t *testing.T) {
+	calls := fakeShortcuts(t)
+	a, tt := newPrefsTester(t)
+	before := a.Settings.Shortcut
+
+	if err := tt.Click(HotkeyText(before)); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+
+	if a.PrefsForm().recording {
+		t.Fatal("Esc 应当退出录制态")
+	}
+	if got := a.Settings.Shortcut; got != before {
+		t.Fatalf("Esc 不该改快捷键：%q", got)
+	}
+	if got := (*calls)[len(*calls)-1]; got != "register "+before {
+		t.Fatalf("取消后应当把原快捷键挂回去，最后一步是 %q", got)
+	}
+}
+
+// TestShortcutRecorderNeedsModifier 光按一个字母不算组合键：继续等，并给出提示。
+func TestShortcutRecorderNeedsModifier(t *testing.T) {
+	fakeShortcuts(t)
+	a, tt := newPrefsTester(t)
+	before := a.Settings.Shortcut
+
+	if err := tt.Click(HotkeyText(before)); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	tt.Key(0, ui.KeyK)
+	tt.Frame()
+	if got := a.Settings.Shortcut; got != before {
+		t.Fatalf("光一个字母不该改快捷键：%q", got)
+	}
+	if !a.PrefsForm().recording {
+		t.Fatal("应当还在录制，等一个带修饰键的组合")
+	}
+	if a.PrefsForm().recordHint == "" {
+		t.Fatal("应当提示要按住修饰键")
+	}
+}
+
+// TestApplyShortcutSameAccReRegisters 录到的还是原来那个组合时也要重新挂上
+// （录制开始时它已经被摘掉了，不能因为「没变化」就直接返回）。
+func TestApplyShortcutSameAccReRegisters(t *testing.T) {
+	calls := fakeShortcuts(t)
+	a := newTestApp(t)
+	cur := a.Settings.Shortcut
+
+	a.StartShortcutRecord()
+	if err := a.ApplyShortcut(cur); err != nil {
+		t.Fatalf("同一个快捷键再应用一次不该报错：%v", err)
+	}
+	if got := (*calls)[len(*calls)-1]; got != "register "+cur {
+		t.Fatalf("录到同一个键也要重新注册，最后一步是 %q", got)
+	}
+	if settings.Load(a.Paths).Shortcut != cur {
+		t.Fatal("不该把设置写坏")
+	}
+	a.StopShortcutRecord()
+}
+
+// TestAcceleratorFromInput 按键到 accelerator 的翻译：字母/数字/功能键/方向键、必须带修饰键。
+func TestAcceleratorFromInput(t *testing.T) {
+	cases := []struct {
+		ev   ui.InputEvent
+		want string
+		ok   bool
+	}{
+		{ui.InputEvent{Kind: ui.InputKeyDown, PhysicalKey: ui.KeyK, Mods: ui.Super | ui.Shift}, "Super+Shift+K", true},
+		{ui.InputEvent{Kind: ui.InputKeyDown, PhysicalKey: ui.KeySpace, Mods: ui.Alt}, "Alt+Space", true},
+		{ui.InputEvent{Kind: ui.InputKeyDown, PhysicalKey: ui.Key1, Mods: ui.Ctrl | ui.Alt}, "Ctrl+Alt+1", true},
+		{ui.InputEvent{Kind: ui.InputKeyDown, PhysicalKey: ui.KeyF5}, "F5", true}, // 功能键不必带修饰键
+		{ui.InputEvent{Kind: ui.InputKeyDown, PhysicalKey: ui.KeyUp, Mods: ui.Super}, "Super+Up", true},
+		{ui.InputEvent{Kind: ui.InputKeyDown, PhysicalKey: ui.KeySlash, Mods: ui.Super}, "Super+/", true},
+		{ui.InputEvent{Kind: ui.InputKeyDown, PhysicalKey: ui.KeyK}, "", false},
+		// 光 ⇧ 不行：把 ⇧K 注册成全局快捷键会吃掉所有大写 K
+		{ui.InputEvent{Kind: ui.InputKeyDown, PhysicalKey: ui.KeyK, Mods: ui.Shift}, "", false},
+		{ui.InputEvent{Kind: ui.InputKeyDown, PhysicalKey: ui.KeyUnknown, Key: ui.KeyUnknown, Mods: ui.Shift}, "", false},
+	}
+	for _, c := range cases {
+		got, ok := AcceleratorFromInput(c.ev)
+		if ok != c.ok || got != c.want {
+			t.Errorf("%+v → %q,%v；期望 %q,%v", c.ev, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+// TestShortcutRecorderCancelsOnClickElsewhere 录制时点到别处就当取消：
+// 否则焦点走了、旧快捷键却还没挂回去，用户等于没了唤出键。
+func TestShortcutRecorderCancelsOnClickElsewhere(t *testing.T) {
+	calls := fakeShortcuts(t)
+	a, tt := newPrefsTester(t)
+	before := a.Settings.Shortcut
+
+	if err := tt.Click(HotkeyText(before)); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !a.PrefsForm().recording {
+		t.Fatal("应当进入录制态")
+	}
+	if r, ok := tt.Find("历史保留条数（0 = 不限）"); ok {
+		tt.ClickAt(r.X+10, r.Y+5) // 点别处的标签
+	}
+	tt.Frame()
+	if a.PrefsForm().recording {
+		t.Fatal("点到别处应当退出录制态")
+	}
+	if got := (*calls)[len(*calls)-1]; got != "register "+before {
+		t.Fatalf("取消后应当把原快捷键挂回去，最后一步是 %q", got)
+	}
+}

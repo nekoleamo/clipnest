@@ -60,11 +60,27 @@ func hexLower(b []byte) string {
 	return string(out)
 }
 
-// Now 是当前时间戳（UTC、毫秒精度 ISO-8601），用于 created_at / updated_at。
+// TimeLayout 是库里时间戳的格式（UTC、毫秒精度 ISO-8601）。
 //
 // 字符串字典序即时间序，排序可以直接交给 SQLite。
+const TimeLayout = "2006-01-02T15:04:05.000Z"
+
+// Now 是当前时间戳，用于 created_at / updated_at。
 func Now() string {
-	return time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	return time.Now().UTC().Format(TimeLayout)
+}
+
+// After 返回严格晚于 at 的下一个时间戳（at 解析不了就给 Now）。
+//
+// 时间戳只到毫秒，同步的「谁更新」又是拿时间戳比的：同一毫秒里插入再改元数据时
+// 两边时间戳会打平，对端 merge 就会当「不比本地新」把这次改动丢掉。需要
+// 「逻辑时钟必须前进」的地方（改 meta_at）用它把时间推后一格。
+func After(at string) string {
+	t, err := time.Parse(TimeLayout, at)
+	if err != nil {
+		return Now()
+	}
+	return t.Add(time.Millisecond).UTC().Format(TimeLayout)
 }
 
 // NewItem 是待入库的条目；id 与时间戳由数据库层补。

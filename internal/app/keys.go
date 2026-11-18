@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
+
+	"github.com/egoist/mygo/ui"
 )
 
 // macOS 的展示符号。
@@ -82,8 +84,10 @@ func HotkeyText(acc string) string {
 		for _, raw := range parts {
 			p := strings.TrimSpace(raw)
 			switch strings.ToLower(p) {
-			case "cmdorctrl", "commandorcontrol", "cmd", "command", "super", "meta", "ctrl", "control":
+			case "cmdorctrl", "commandorcontrol", "ctrl", "control":
 				flat += "Ctrl+"
+			case "cmd", "command", "super", "meta":
+				flat += "Win+" // 录制时按下的 Win 键，别显示成 Ctrl
 			case "shift":
 				flat += "Shift+"
 			case "alt", "option", "opt":
@@ -118,4 +122,107 @@ func Slot(index int) string {
 		prefix = macSlotPrefix
 	}
 	return fmt.Sprintf("%s%d", prefix, index+1)
+}
+
+// AcceleratorFromInput 把设置窗里录到的一次按键翻成 accelerator（"Super+Shift+K"）。
+//
+// 只认能注册的组合：带 ⌘/⌃/⌥ 之一（光 ⇧ 不行，会把打大写字母吃掉），或 F1–F12。
+// 键名优先用「物理键位」（PhysicalKey）：mygo 的全局快捷键是按 ANSI 硬编码数字键码注册的，
+// 跟布局无关，用布局相关的 Key 在非美式键盘上会注册成另一个键。
+func AcceleratorFromInput(ev ui.InputEvent) (string, bool) {
+	k := ev.PhysicalKey
+	if k == ui.KeyUnknown {
+		k = ev.Key
+	}
+	name, ok := acceleratorKeyName(k)
+	if !ok {
+		return "", false
+	}
+	var parts []string
+	if ev.Mods&ui.Super != 0 {
+		parts = append(parts, "Super")
+	}
+	if ev.Mods&ui.Ctrl != 0 {
+		parts = append(parts, "Ctrl")
+	}
+	if ev.Mods&ui.Alt != 0 {
+		parts = append(parts, "Alt")
+	}
+	if ev.Mods&ui.Shift != 0 {
+		parts = append(parts, "Shift")
+	}
+	// 必须有 ⌘/⌃/⌥ 之一（⇧ 不算）：把 ⇧K 注册成全局快捷键的话，
+	// 用户在任何地方打大写 K 都会被吃掉。
+	strong := ev.Mods&(ui.Super|ui.Ctrl|ui.Alt) != 0
+	if !strong && !(len(name) == 2 && name[0] == 'F') {
+		return "", false
+	}
+	return strings.Join(append(parts, name), "+"), true
+}
+
+// acceleratorKeyName 是 mygo 全局快捷键认的键名（accelerator 语法）。
+func acceleratorKeyName(k ui.Key) (string, bool) {
+	switch {
+	case k >= ui.KeyA && k <= ui.KeyZ:
+		return string(rune('A' + (k - ui.KeyA))), true
+	case k >= ui.Key0 && k <= ui.Key9:
+		return string(rune('0' + (k - ui.Key0))), true
+	case k >= ui.KeyF1 && k <= ui.KeyF12:
+		return fmt.Sprintf("F%d", int(k-ui.KeyF1)+1), true
+	}
+	switch k {
+	case ui.KeySpace:
+		return "Space", true
+	case ui.KeyEnter:
+		return "Enter", true
+	case ui.KeyTab:
+		return "Tab", true
+	case ui.KeyBackspace:
+		return "Backspace", true
+	case ui.KeyEscape:
+		return "Escape", true
+	case ui.KeyDelete:
+		return "Delete", true
+	case ui.KeyInsert:
+		return "Insert", true
+	case ui.KeyHome:
+		return "Home", true
+	case ui.KeyEnd:
+		return "End", true
+	case ui.KeyPageUp:
+		return "PageUp", true
+	case ui.KeyPageDown:
+		return "PageDown", true
+	case ui.KeyUp:
+		return "Up", true
+	case ui.KeyDown:
+		return "Down", true
+	case ui.KeyLeft:
+		return "Left", true
+	case ui.KeyRight:
+		return "Right", true
+	case ui.KeyMinus:
+		return "-", true
+	case ui.KeyEqual:
+		return "=", true
+	case ui.KeyComma:
+		return ",", true
+	case ui.KeyPeriod:
+		return ".", true
+	case ui.KeySlash:
+		return "/", true
+	case ui.KeySemicolon:
+		return ";", true
+	case ui.KeyQuote:
+		return "'", true
+	case ui.KeyBracketLeft:
+		return "[", true
+	case ui.KeyBracketRight:
+		return "]", true
+	case ui.KeyBackslash:
+		return "\\", true
+	case ui.KeyBackquote:
+		return "`", true
+	}
+	return "", false
 }

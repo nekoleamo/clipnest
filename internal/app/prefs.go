@@ -30,9 +30,11 @@ type prefsForm struct {
 	position    int // 0 = 屏幕居中, 1 = 贴屏幕底部
 	scroll      ui.ScrollState
 
-	// 快捷键与清理
-	shortcut  string
-	pruneDays float64
+	// 快捷键
+	shortcut   string
+	recording  bool   // 正在录快捷键（等下一个带修饰键的按键）
+	recordHint string // 录制中途的提醒（比如「要带 ⌘/⌃/⌥/⇧」）
+	pruneDays  float64
 
 	// 过滤与导出
 	ignoreSensitive bool
@@ -112,10 +114,15 @@ func (a *App) PrefsForm() *prefsForm {
 // 不留上次没保存的编辑（和面板的 ResetPanelState 一个道理）。
 func (a *App) ResetPrefsForm() {
 	a.mu.Lock()
-	defer a.mu.Unlock()
+	wasRecording := a.form.recording
 	a.loadPrefsFormLocked()
 	a.form.status = ""
 	a.form.scroll.Y = 0
+	a.mu.Unlock()
+	if wasRecording {
+		// 上次关窗时还在录快捷键：录制态没了，但键还没挂回去
+		a.restoreShortcut()
+	}
 }
 
 // SavePrefs 把设置窗的草稿写回 settings.json / sync.json（点「保存」时调用）。
@@ -189,7 +196,17 @@ func (a *App) prefsView(c *ui.Context) {
 	th := c.Theme()
 	f := a.PrefsForm()
 
-	ui.Column(c).Fill().Gap(10).Padding(16).Background(th.Background).Children(func() {
+	col := ui.Column(c).Fill().Gap(10).Padding(16).Background(th.Background)
+	// 录制快捷键时点到别处就当取消（不然焦点走了还挂着「按下组合键…」，
+	// 而那时旧快捷键已经被摘掉，等于用户没了唤出键）。刚点进录制框的那一下
+	// 早在上一帧就结束了，不会被这里误判。
+	col.ObserveInput(func(ev ui.InputEvent) {
+		if f.recording && ev.Kind == ui.InputPointerDown {
+			a.StopShortcutRecord()
+			f.recordHint = ""
+		}
+	})
+	col.Children(func() {
 		ui.Scroll(c).Fill().TrackScroll(&f.scroll).KeepScrollbars(true).Children(func() {
 			ui.Column(c).Gap(10).Children(func() {
 				ui.Text(c, "clipnest 设置").FontSize(16).Bold().TextColor(th.Text)
@@ -203,16 +220,16 @@ func (a *App) prefsView(c *ui.Context) {
 				label(c, "面板位置", th)
 				ui.Segmented(c, &f.position, "屏幕居中", "贴屏幕底部")
 
-				label(c, "唤起快捷键（accelerator，如 CmdOrCtrl+Shift+V / Alt+Space；当前 "+a.Hotkey()+"）", th)
+				label(c, "唤起快捷键（点右边的框，然后在键盘上按组合键；Esc 取消）", th)
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					ui.TextInput(c, &f.shortcut).Width(240)
-					if ui.Button(c, "应用快捷键").Clicked() {
-						a.ApplyShortcutDraft(f.shortcut)
-					}
+					a.shortcutRecorder(c, f, th)
 					if ui.Button(c, "恢复默认").Clicked() {
 						a.ApplyShortcutDraft(settings.DefaultShortcut)
 					}
 				})
+				if f.recordHint != "" {
+					ui.Text(c, f.recordHint).FontSize(11).TextColor(th.TextMuted)
+				}
 				if msg := a.ShortcutMessage(); msg != "" {
 					ui.Text(c, msg).FontSize(11).TextColor(th.TextMuted)
 				}
@@ -414,9 +431,7 @@ func (a *App) prefsView(c *ui.Context) {
 				f.status = "同步已发起"
 			}
 			if ui.Button(c, "关闭").Clicked() {
-				if a.prefs != nil {
-					a.prefs.Hide()
-				}
+				a.HidePrefs()
 			}
 		})
 
@@ -435,6 +450,64 @@ func (a *App) prefsView(c *ui.Context) {
 
 func label(c *ui.Context, text string, th *ui.Theme) {
 	ui.Text(c, text).FontSize(11).TextColor(th.TextMuted)
+}
+
+// shortcutRecorder 是「点一下、再按组合键」的快捷键录制框。
+//
+// 不用输入框：让用户手打 accelerator（CmdOrCtrl+Shift+V）既容易打错，也没人记得语法。
+// 点一下进入录制态，下一个带修饰键的按键就是新快捷键，Esc 取消。
+func (a *App) shortcutRecorder(c *ui.Context, f *prefsForm, th *ui.Theme) {
+	text := HotkeyText(f.shortcut)
+	border := th.Border
+	fg := th.Text
+	if f.recording {
+		text = "按下组合键…"
+		border = th.Accent
+		fg = th.Accent
+	}
+	box := ui.Row(c).Width(200).Height(30).Focusable().
+		Gap(6).AlignItems(ui.Center).Justify(ui.Center).
+		Radius(th.Radius).Border(1, border).Background(th.Surface)
+	box.Children(func() {
+		ui.Text(c, text).FontSize(13).TextColor(fg)
+	})
+	box.OnClick(func() { a.StartShortcutRecord() })
+	// 录制时自己吃掉键盘：换成输入框的话，带 ⌘ 的组合会被当成文本编辑命令
+	box.HandleInput(func(ev ui.InputEvent) bool {
+		if !f.recording || ev.Kind != ui.InputKeyDown || ev.Repeat {
+			return false
+		}
+		if ev.Key == ui.KeyEscape || ev.PhysicalKey == ui.KeyEscape {
+			a.StopShortcutRecord()
+			f.recordHint = "已取消"
+			return true
+		}
+		if acc, ok := AcceleratorFromInput(ev); ok {
+			f.recordHint = ""
+			a.ApplyShortcutDraft(acc)
+			a.StopShortcutRecord()
+			return true
+		}
+		if _, ok := acceleratorKeyName(ev.PhysicalKey); !ok {
+			_, named := acceleratorKeyName(ev.Key)
+			if !named {
+				return true // 不认识的键（纯粹是修饰键、媒体键之类），接着等
+			}
+		}
+		f.recordHint = "要按住 ⌘ / ⌃ / ⌥ 再按一个键（⇧ 单独不算；也可以直接按 F1–F12）"
+		return true
+	})
+	if f.recording {
+		box.Focus()
+	}
+}
+
+// HidePrefs 收起设置窗；正在录快捷键就先收尾，否则那个键会一直没挂上。
+func (a *App) HidePrefs() {
+	a.StopShortcutRecord()
+	if a.prefs != nil {
+		a.prefs.Hide()
+	}
 }
 
 // OpenPrefs 打开设置窗。

@@ -418,14 +418,15 @@ func (a *App) ApplyShortcut(acc string) error {
 	a.mu.Lock()
 	old := a.Settings.Shortcut
 	a.mu.Unlock()
-	if acc == old {
-		return nil
-	}
-	mygo.GlobalShortcut.Unregister(old)
-	if err := mygo.GlobalShortcut.Register(acc, a.TogglePanel); err != nil {
+	// 先摘再挂：录制时旧键可能已经被摘掉，重新注册一遍也没关系
+	unregisterShortcut(old)
+	if err := registerShortcut(acc, a.TogglePanel); err != nil {
 		// 回滚，别让用户丢了原来的快捷键
-		_ = mygo.GlobalShortcut.Register(old, a.TogglePanel)
+		_ = registerShortcut(old, a.TogglePanel)
 		return fmt.Errorf("注册 %s 失败（可能被别的应用占用）：%w", acc, err)
+	}
+	if acc == old {
+		return nil // 还是同一个键：已经重新挂好，不用落盘
 	}
 	next := a.Settings
 	next.Shortcut = acc
@@ -438,6 +439,54 @@ func (a *App) ApplyShortcut(acc string) error {
 	a.refreshTrayMenu()
 	logf("SHORTCUT now %s (%s)", acc, HotkeyText(acc))
 	return nil
+}
+
+// 全局快捷键的注册口子。
+//
+// 测试里必须替掉：mygo 的 Register 会往主线程投递消息并**一直等**，
+// headless 测试没有主线程在跑事件循环，直接卡死。
+var (
+	registerShortcut   = func(acc string, fn func()) error { return mygo.GlobalShortcut.Register(acc, fn) }
+	unregisterShortcut = func(acc string) { mygo.GlobalShortcut.Unregister(acc) }
+)
+
+// StartShortcutRecord 进入录制态。
+//
+// 必须先把当前快捷键摘掉：Carbon 的全局热键不看窗口焦点，用户按到旧组合时
+// 面板会被唤出/收起，录制框根本收不到那个键。
+func (a *App) StartShortcutRecord() {
+	f := a.PrefsForm()
+	f.recording = true
+	f.recordHint = ""
+	a.mu.Lock()
+	cur := a.Settings.Shortcut
+	a.mu.Unlock()
+	unregisterShortcut(cur)
+	logf("SHORTCUT record start (paused %s)", cur)
+	a.invalidatePrefs()
+}
+
+// StopShortcutRecord 结束录制：不管是因为录到了新组合还是 Esc 取消，
+// 都把「当前该生效的那个」重新挂回去（录制开始时它被摘掉了）。
+func (a *App) StopShortcutRecord() {
+	f := a.PrefsForm()
+	if !f.recording {
+		return
+	}
+	f.recording = false
+	a.restoreShortcut()
+	a.invalidatePrefs()
+}
+
+// restoreShortcut 把设置里当前那个快捷键重新挂上。
+func (a *App) restoreShortcut() {
+	a.mu.Lock()
+	cur := a.Settings.Shortcut
+	a.mu.Unlock()
+	unregisterShortcut(cur)
+	if err := registerShortcut(cur, a.TogglePanel); err != nil {
+		logf("SHORTCUT re-register %s failed: %v", cur, err)
+	}
 }
 
 // RequestAccessibility 处理「去授权」：
