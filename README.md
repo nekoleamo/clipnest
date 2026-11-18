@@ -118,7 +118,7 @@ docs/                路线图、执行计划、发布流程
 | `docs/执行计划-下一步.md` | 当前状态与待做事项 |
 | `docs/发布.md` | 打包、发版、双源分发、Homebrew / Scoop |
 | `docs/变更记录.md` | 版本变更摘要（当前 1.3.5） |
-| `docs/windows-能力对照.md` | 逐项对照 macOS 能力在 Windows 的等价实现与验证状态 |
+| `docs/windows-能力对照.md` | Windows 侧说明：为什么两端等价、出问题先查哪、已知缺口 |
 | `AGENTS.md` | 协作约定与框架坑位（开发前必读） |
 | `docs/nsh-时代的历史坑.md` | nsh 0.5.1 与 Rust 时代的实测坑（历史参考） |
 
