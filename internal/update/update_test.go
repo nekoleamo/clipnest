@@ -135,3 +135,68 @@ func TestLatestTimeout(t *testing.T) {
 		t.Fatalf("超时没生效，等了 %s", time.Since(start))
 	}
 }
+
+// TestClientForSources 三个源各自的 API 根与网页根（Gitee 的 API 在 /api/v5 下）。
+func TestClientForSources(t *testing.T) {
+	gh := ClientFor(SourceGitHub, "", "v1.0.0")
+	if gh.APIBase != "https://api.github.com" || gh.WebBase != "https://github.com" {
+		t.Fatalf("GitHub 源配错了：%+v", gh)
+	}
+	gt := ClientFor(SourceGitee, "", "v1.0.0")
+	if gt.APIBase != "https://gitee.com/api/v5" || gt.WebBase != "https://gitee.com" {
+		t.Fatalf("Gitee 源配错了：%+v", gt)
+	}
+	cu := ClientFor(SourceCustom, "https://gh.example.com/api.github.com/", "v1.0.0")
+	if cu.APIBase != "https://gh.example.com/api.github.com" {
+		t.Fatalf("自定义源没去掉末尾斜杠：%q", cu.APIBase)
+	}
+	if cu.WebBase != "https://gh.example.com" {
+		t.Fatalf("自定义源的网页根推导错了：%q", cu.WebBase)
+	}
+	// 空的自定义源退回 GitHub，不至于拼出空 URL
+	if empty := ClientFor(SourceCustom, "  ", "v1"); empty.APIBase != "https://api.github.com" {
+		t.Fatalf("空自定义源没兜底：%q", empty.APIBase)
+	}
+	// 不认识的值按 GitHub 处理
+	if bad := ClientFor("npm", "", "v1"); bad.APIBase != "https://api.github.com" {
+		t.Fatalf("未知源没兜底：%q", bad.APIBase)
+	}
+}
+
+// TestLatestGiteeShape Gitee 不返回 html_url、发布时间叫 created_at：链接要自己拼。
+func TestLatestGiteeShape(t *testing.T) {
+	c := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"tag_name":"v1.1.0","name":"1.1.0","body":"notes","created_at":"2026-11-18T10:00:00Z"}`))
+	})
+	c.WebBase = "https://gitee.com"
+	rel, err := c.Latest(context.Background(), "me/clipnest")
+	if err != nil {
+		t.Fatalf("查更新失败：%v", err)
+	}
+	if rel.URL != "https://gitee.com/me/clipnest/releases/tag/v1.1.0" {
+		t.Fatalf("Gitee 发布页链接拼错了：%q", rel.URL)
+	}
+	if rel.PublishedAt != "2026-11-18T10:00:00Z" {
+		t.Fatalf("created_at 没当发布时间用：%q", rel.PublishedAt)
+	}
+	// 网页根为空时不瞎猜，宁可没有链接
+	c2 := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"tag_name":"v1.1.0"}`))
+	})
+	rel2, _ := c2.Latest(context.Background(), "me/clipnest")
+	if rel2.URL != "" {
+		t.Fatalf("没有网页根不该编链接：%q", rel2.URL)
+	}
+}
+
+// TestSourceIndexAndLabels 下拉文案与取值互相对应。
+func TestSourceIndexAndLabels(t *testing.T) {
+	for i, label := range SourceLabels {
+		if got := IndexOf(SourceOf(label)); got != i {
+			t.Fatalf("文案 %q 对不上源：index=%d", label, got)
+		}
+	}
+	if IndexOf("nope") != 0 || SourceOf("Nope") != SourceGitHub {
+		t.Fatal("不认识的源应当归到 GitHub")
+	}
+}

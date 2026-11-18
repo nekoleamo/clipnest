@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,45 @@ type Release struct {
 	URL         string `json:"html_url"`
 	Notes       string `json:"body"`
 	PublishedAt string `json:"published_at"`
+	// CreatedAt 是 Gitee 的发布时间字段（它不是 GitHub 的 published_at）。
+	CreatedAt string `json:"created_at"`
+}
+
+// 更新源。国内直连 GitHub 常是「API 通、下载断」，gitee 是给这种网络留的。
+const (
+	SourceGitHub = "github"
+	SourceGitee  = "gitee"
+	SourceCustom = "custom"
+)
+
+// SourceLabels 是设置窗下拉里显示的文案（顺序与 Sources 一致）。
+var SourceLabels = []string{"GitHub", "Gitee", "自定义"}
+
+// Sources 是 SourceLabels 对应的取值。
+var Sources = []string{SourceGitHub, SourceGitee, SourceCustom}
+
+// IndexOf 返回 source 在 Sources 里的下标（不认识的归到 GitHub）。
+func IndexOf(source string) int {
+	source = strings.ToLower(strings.TrimSpace(source))
+	for i, s := range Sources {
+		if s == source {
+			return i
+		}
+	}
+	return 0
+}
+
+// SourceOf 是 SourceLabels 里的文案对应的取值（不认识的归到 GitHub）。
+func SourceOf(label string) string { return Sources[IndexOfLabel(label)] }
+
+// IndexOfLabel 返回文案在 SourceLabels 里的下标（不认识的归到 0）。
+func IndexOfLabel(label string) int {
+	for i, l := range SourceLabels {
+		if l == label {
+			return i
+		}
+	}
+	return 0
 }
 
 // notesLimit 是更新说明最多留多少字（摆不进面板的信息不值得留在内存里）。
@@ -35,6 +75,9 @@ const maxBody = 256 << 10
 // APIBase 与 HTTP 都能注入：测试里指到 httptest 服务器，顺手还能测超时与坏 JSON。
 type Client struct {
 	APIBase string
+	// WebBase 是拼发布页用到的网页根（GitHub/Gitee 的 API 与网页不在同一个域）。
+	// 留空就不猜，只认接口返回的 URL。
+	WebBase string
 	HTTP    *http.Client
 	// UserAgent 是请求头里的标识；GitHub 的 API 要求带上它。
 	UserAgent string
@@ -44,9 +87,38 @@ type Client struct {
 func DefaultClient(version string) Client {
 	return Client{
 		APIBase:   "https://api.github.com",
+		WebBase:   "https://github.com",
 		HTTP:      &http.Client{Timeout: 8 * time.Second},
 		UserAgent: "clipnest/" + strings.TrimSpace(version),
 	}
+}
+
+// ClientFor 按更新源给出客户端：github / gitee 用内置根，custom 用 apiBase。
+// apiBase 为空的自定义源会退到默认（否则只能报「没有更新源」）。
+func ClientFor(source, apiBase, version string) Client {
+	c := DefaultClient(version)
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case SourceGitee:
+		c.APIBase = "https://gitee.com/api/v5"
+		c.WebBase = "https://gitee.com"
+	case SourceCustom:
+		switch base := strings.TrimRight(strings.TrimSpace(apiBase), "/"); {
+		case base != "":
+			c.APIBase = base
+			c.WebBase = webBaseOf(base)
+		}
+	}
+	return c
+}
+
+// webBaseOf 从 API 根里取 scheme://host（反代形如 https://host/api.github.com）。
+// 取不出来就返回空，让「打开发布页」依赖接口返回的 URL。
+func webBaseOf(apiBase string) string {
+	u, err := url.Parse(apiBase)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
 }
 
 // Latest 取仓库的最新发布。
@@ -101,6 +173,13 @@ func (c Client) Latest(ctx context.Context, repo string) (Release, error) {
 		return Release{}, fmt.Errorf("更新信息解析失败：%w", err)
 	}
 	rel.Tag = strings.TrimSpace(rel.Tag)
+	// Gitee 不返回 html_url，用网页根拼发布页；发布日期字段名也不同。
+	if rel.URL == "" && rel.Tag != "" && c.WebBase != "" {
+		rel.URL = strings.TrimRight(c.WebBase, "/") + "/" + repo + "/releases/tag/" + rel.Tag
+	}
+	if rel.PublishedAt == "" {
+		rel.PublishedAt = rel.CreatedAt
+	}
 	if got := []rune(rel.Notes); len(got) > notesLimit {
 		rel.Notes = string(got[:notesLimit]) + "…"
 	}

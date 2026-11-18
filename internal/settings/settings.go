@@ -46,6 +46,11 @@ type Settings struct {
 	Shortcut string `json:"shortcut"`
 	// ReleaseRepo 是「检查更新」用的仓库（owner/repo）；留空表示不检查。
 	ReleaseRepo string `json:"release_repo"`
+	// ReleaseSource 是更新源：github（默认）/ gitee / custom。
+	// 国内直连 GitHub 常是「API 通、资产断」，换成 gitee 就快得多。
+	ReleaseSource string `json:"release_source"`
+	// ReleaseAPIBase 只在 ReleaseSource=custom 时生效，填 API 根（例如自建反代）。
+	ReleaseAPIBase string `json:"release_api_base"`
 	// HideAccessibilityHint 关掉面板顶部那条「没有辅助功能授权」提示（用户自己知道就行）。
 	// 授权状态真变了会自动恢复正常显示（见 tray 里的菜单项）。
 	HideAccessibilityHint bool `json:"hide_accessibility_hint"`
@@ -61,6 +66,7 @@ func Default() Settings {
 		IgnoreSensitiveApps: true,
 		ExportDir:           "",
 		ReleaseRepo:         "",
+		ReleaseSource:       "github",
 		Shortcut:            DefaultShortcut,
 	}
 }
@@ -89,6 +95,14 @@ func Normalize(s Settings) Settings {
 	if s.Shortcut == "" {
 		s.Shortcut = DefaultShortcut
 	}
+	s.ReleaseSource = strings.ToLower(strings.TrimSpace(s.ReleaseSource))
+	switch s.ReleaseSource {
+	case "github", "gitee", "custom":
+	default:
+		s.ReleaseSource = "github"
+	}
+	s.ReleaseAPIBase = strings.TrimRight(strings.TrimSpace(s.ReleaseAPIBase), "/")
+	s.ReleaseRepo = strings.Trim(strings.TrimSpace(s.ReleaseRepo), "/")
 	return s
 }
 

@@ -22,7 +22,7 @@ func fakeRelease(t *testing.T, tag string) *int {
 	}))
 	t.Cleanup(srv.Close)
 	old := updateClient
-	updateClient = func(string) update.Client {
+	updateClient = func(string, string, string) update.Client {
 		return update.Client{APIBase: srv.URL, HTTP: srv.Client(), UserAgent: "clipnest/test"}
 	}
 	t.Cleanup(func() { updateClient = old })
@@ -88,7 +88,7 @@ func TestCheckUpdateError(t *testing.T) {
 	}))
 	defer srv.Close()
 	old := updateClient
-	updateClient = func(string) update.Client {
+	updateClient = func(string, string, string) update.Client {
 		return update.Client{APIBase: srv.URL, HTTP: srv.Client()}
 	}
 	defer func() { updateClient = old }()
@@ -120,5 +120,83 @@ func TestSaveUpdateRepo(t *testing.T) {
 	}
 	if got := *a.UpdateRepoDraft(); got != "neko/clipnest" {
 		t.Fatalf("草稿没同步：%q", got)
+	}
+}
+
+// TestSaveUpdateSource 切源会落盘（源 + 仓库 + API 根），草稿同步。
+func TestSaveUpdateSource(t *testing.T) {
+	a := newTestApp(t)
+	a.SaveUpdateSource(update.SourceCustom, "me/repo", "https://gh.example.com/api.github.com")
+
+	loaded := settings.Load(a.Paths)
+	if loaded.ReleaseSource != update.SourceCustom || loaded.ReleaseRepo != "me/repo" ||
+		loaded.ReleaseAPIBase != "https://gh.example.com/api.github.com" {
+		t.Fatalf("设置没落盘：%+v", loaded)
+	}
+	if got := *a.UpdateSourceDraft(); got != update.SourceCustom {
+		t.Fatalf("源草稿没同步：%q", got)
+	}
+	if got := *a.UpdateAPIBaseDraft(); got != "https://gh.example.com/api.github.com" {
+		t.Fatalf("API 根草稿没同步：%q", got)
+	}
+	// 只存仓库名（老入口）不该把源清掉
+	a.SaveUpdateRepo("other/repo")
+	if got := settings.Load(a.Paths).ReleaseSource; got != update.SourceCustom {
+		t.Fatalf("只存仓库名时源被改掉了：%q", got)
+	}
+}
+
+// TestCheckUpdateCustomWithoutAPIBase 自定义源没填 API 根：给提示，不发请求。
+func TestCheckUpdateCustomWithoutAPIBase(t *testing.T) {
+	hits := fakeRelease(t, "v9.9.9")
+	a := newTestApp(t)
+	a.Settings.ReleaseSource = update.SourceCustom
+	a.Settings.ReleaseRepo = "me/repo"
+	a.Settings.ReleaseAPIBase = ""
+
+	a.CheckUpdate()
+	msg, _ := a.UpdateStatus()
+	if !strings.Contains(msg, "API 根") {
+		t.Fatalf("应当提示填 API 根：%q", msg)
+	}
+	if *hits != 0 {
+		t.Fatal("没填 API 根不该发请求")
+	}
+}
+
+// TestCheckUpdatePassesSource 选 Gitee 时把源和空 API 根交给客户端工厂（由它决定真实根）。
+func TestCheckUpdatePassesSource(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"tag_name":"v1.0.0"}`))
+	}))
+	defer srv.Close()
+
+	var gotSource, gotBase string
+	old := updateClient
+	updateClient = func(source, apiBase, _ string) update.Client {
+		gotSource, gotBase = source, apiBase
+		return update.Client{APIBase: srv.URL, HTTP: srv.Client(), WebBase: "https://gitee.com"}
+	}
+	defer func() { updateClient = old }()
+
+	a := newTestApp(t)
+	a.Settings.ReleaseSource = update.SourceGitee
+	a.Settings.ReleaseRepo = "null_593_5354/clipnest"
+	a.CheckUpdate()
+	_ = waitStatus(t, a)
+
+	if gotSource != update.SourceGitee || gotBase != "" {
+		t.Fatalf("源没传到客户端：source=%q base=%q", gotSource, gotBase)
+	}
+}
+
+// TestUpdateRepoFor 切源时能带出该源上的本仓镜像名。
+func TestUpdateRepoFor(t *testing.T) {
+	a := newTestApp(t)
+	if got := a.UpdateRepoFor(update.SourceGitee); !strings.Contains(got, "/") {
+		t.Fatalf("Gitee 没给默认仓库名：%q", got)
+	}
+	if got := a.UpdateRepoFor(update.SourceCustom); got != "" {
+		t.Fatalf("自定义源不该猜仓库名：%q", got)
 	}
 }

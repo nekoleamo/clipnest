@@ -13,7 +13,7 @@ macOS / Windows 剪贴板历史管理器。菜单栏（托盘）常驻，`⌘⇧
 - **整理**：置顶 / 收藏 / 备注 / 分组 / 敏感标记；`⌘` 点多选批量删除，删后 10 秒内可撤销
 - **导出**：`⌘O` 或右键导出（文本存文件、文件条目复制到目录）、拖拽到 Finder / 资源管理器
 - **同步**：WebDAV 增量同步 + 端到端加密（argon2id + chacha20poly1305），局域网与 Tailscale 双地址自动切换，采集后 1.2 秒实时推送
-- **其他**：加密备份导入导出、暂停记录、运行期日志轮转、检查更新（只查不装）、开机自启
+- **其他**：加密备份导入导出、暂停记录、运行期日志轮转、检查更新（GitHub / Gitee / 自定义源，只查不装）、开机自启
 
 ## 安装
 
@@ -65,7 +65,7 @@ internal/paste       粘贴注入（CGEvent / SendInput）
 internal/sensitive   敏感应用过滤（前台应用身份）
 internal/sync        WebDAV 增量同步 + 端到端加密
 internal/backup      CNST1 加密容器
-internal/update      检查更新（只查不装）
+internal/update      检查更新（GitHub / Gitee / 自定义源，只查不装）
 tools/               发版、安装脚本与验证工具（非产品代码）
 docs/                路线图、执行计划、发布流程
 ```
