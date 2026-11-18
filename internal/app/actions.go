@@ -399,7 +399,7 @@ func (a *App) ClearAllHistoryWithBackup(passphrase string) string {
 		passphrase = a.savedPassphrase()
 	}
 	if passphrase == "" {
-		return "⚠️ 没有口令，没法先备份，所以没有清空（在「同步」里填一次口令再来）"
+		return "⚠️ 没有加密口令，没法先备份，所以没有清空（在「同步」里填一次加密口令再来）"
 	}
 	path, err := backup.ExportTo(a.Store.DB, a.Paths, passphrase)
 	if err != nil {
@@ -409,17 +409,20 @@ func (a *App) ClearAllHistoryWithBackup(passphrase string) string {
 	return "已备份 " + baseName(path) + " · " + a.ClearAllHistory()
 }
 
-// secretGet 可注入：headless 测试里读系统凭据会等主线程，直接卡死。
-var secretGet = func(service, key string) (string, error) { return clipsync.SecretGet(service, key) }
+// 系统凭据的读写口子，可注入：测试里必须替掉——macOS 那份直接调 Security 框架、
+// 不看有没有事件循环，测试会**真的往登录钥匙串里写条目**（踩过：留下一条
+// clipnest-sync/<主机名>-local）。
+var (
+	secretGet = func(service, key string) (string, error) { return clipsync.SecretGet(service, key) }
+	secretSet = func(service, key, value string) error { return clipsync.SecretSet(service, key, value) }
+)
 
-// savedPassphrase 是从系统凭据里取已保存的口令（同步加密用的那个，WebDAV 的兜底），
-// 取不到给空串。
+// savedPassphrase 是系统凭据里存着的**加密口令**（备份也用这一份），取不到给空串。
+// 不拿 WebDAV 账号口令兜底：那是 NAS 的密码，拿它加密出来的备份以后没人记得住。
 func (a *App) savedPassphrase() string {
 	cfg := clipsync.LoadConfig(a.Paths)
-	for _, service := range []string{clipsync.SecretService, clipsync.WebDavSecretService} {
-		if pw, err := secretGet(service, cfg.DeviceName); err == nil && pw != "" {
-			return pw
-		}
+	if pw, err := secretGet(clipsync.SecretService, cfg.DeviceName); err == nil {
+		return pw
 	}
 	return ""
 }

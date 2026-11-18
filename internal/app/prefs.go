@@ -53,7 +53,10 @@ type prefsForm struct {
 	fallbackURL string
 	remoteUser  string
 	remoteDir   string
-	passphrase  string
+	// passphrase 是端到端加密（与 .cnbak 备份）的口令，存 clipnest-sync/<设备名>
+	passphrase string
+	// webdavPass 是 WebDAV 账号口令，存 clipnest-webdav/<设备名>；两者可以不同
+	webdavPass string
 	insecure    bool
 	encrypt     bool
 	realtime    bool
@@ -177,19 +180,20 @@ func (a *App) SavePrefs() {
 		return
 	}
 	if f.encrypt && f.passphrase != "" {
-		if err := clipsync.SecretSet(clipsync.SecretService, nextCfg.DeviceName, f.passphrase); err != nil {
-			f.status = "⚠️ 口令没写进" + clipsync.SecretStoreName() + "：" + err.Error()
+		if err := secretSet(clipsync.SecretService, nextCfg.DeviceName, f.passphrase); err != nil {
+			f.status = "⚠️ 加密口令没写进" + clipsync.SecretStoreName() + "：" + err.Error()
 		}
 	}
-	if f.backendKind == 1 && f.passphrase != "" {
-		// WebDAV 账号口令也存一份；存不进去要报出来，否则之后同步发请求时
-		// 只会得到一个「认证失败」，看不出是这一步没落盘
-		if err := clipsync.SecretSet(clipsync.WebDavSecretService, nextCfg.DeviceName, f.passphrase); err != nil {
+	if f.backendKind == 1 && f.webdavPass != "" {
+		// WebDAV 账号口令单独存一份；存不进去要报出来，否则之后同步发请求时
+		// 只会得到一个「401」，看不出是这一步没落盘
+		if err := secretSet(clipsync.WebDavSecretService, nextCfg.DeviceName, f.webdavPass); err != nil {
 			logf("WEBDAV secret save failed: %v", err)
 			f.status = "⚠️ WebDAV 口令没写进" + clipsync.SecretStoreName() + "：" + err.Error()
 		}
 	}
 	f.passphrase = ""
+	f.webdavPass = ""
 	a.Refresh()
 	if f.status == "" {
 		f.status = "✅ 已保存"
@@ -268,7 +272,7 @@ func (a *App) prefsView(c *ui.Context) {
 					}
 				})
 				if a.ClearConfirming() {
-					label(c, "⚠️ 清空前会先导一份加密备份到 backups/（用这里的口令，没填就用系统凭据里存着的；两者都没有就不清）", th)
+					label(c, "⚠️ 清空前会先导一份加密备份到 backups/（用「加密口令」，没填就用凭据里存着的；两者都没有就不清）", th)
 				}
 
 				label(c, "敏感应用白名单（每行一个 bundle id / 进程名；留空用内置表）", th)
@@ -293,16 +297,18 @@ func (a *App) prefsView(c *ui.Context) {
 					ui.TextInput(c, &f.remoteURL)
 					label(c, "备用地址（Tailscale / 外网；局域网不通时自动切过去）", th)
 					ui.TextInput(c, &f.fallbackURL).Placeholder("https://nas.<tailnet>.ts.net:5006")
-					label(c, "用户名（WebDAV 账号）", th)
+					label(c, "WebDAV 用户名", th)
 					ui.TextInput(c, &f.remoteUser)
+					label(c, "WebDAV 账号口令（写进"+clipsync.SecretStoreName()+"，留空不改）", th)
+					ui.TextInput(c, &f.webdavPass).Placeholder("NAS 账号密码（留空不改）")
 					label(c, "远端目录", th)
 					ui.TextInput(c, &f.remoteDir)
 					ui.Checkbox(c, &f.insecure, "允许自签证书（NAS 常见，有风险）")
 				}
-				// 口令不分模式：WebDAV 拿它当账号口令，加密与备份拿它派生密钥。
-				// 以前它嵌在 WebDAV 分支里，选本地目录时既设不了加密口令，也导不了备份。
-				label(c, "口令（WebDAV 账号口令 / 加密与备份口令；写进"+clipsync.SecretStoreName()+"，留空不改）", th)
-				ui.TextInput(c, &f.passphrase).Placeholder("口令（留空不改）")
+				// 加密口令不分同步方式（本地目录也要加密），而且两台机器必须是同一个。
+				// 它和 WebDAV 账号口令是两回事，各存各的条目，别混。
+				label(c, "加密口令（端到端加密与备份共用；两台机器要填同一个，写进"+clipsync.SecretStoreName()+"，留空不改）", th)
+				ui.TextInput(c, &f.passphrase).Placeholder("加密口令（留空不改）")
 				ui.Checkbox(c, &f.encrypt, "端到端加密（用口令派生密钥）")
 				label(c, "自动同步间隔（秒；<60 不自动跑）", th)
 				ui.NumberInput(c, &f.interval, 0, 86400, 300)
@@ -342,11 +348,11 @@ func (a *App) prefsView(c *ui.Context) {
 
 				ui.Divider(c)
 				ui.Text(c, "备份").FontSize(14).Bold().TextColor(th.Text)
-				label(c, "导出整个历史成一个加密 .cnbak（口令同上）", th)
+				label(c, "导出整个历史成一个加密 .cnbak（用上面的加密口令）", th)
 				ui.Row(c).Gap(8).Children(func() {
 					if ui.Button(c, "导出备份").Clicked() {
 						if f.passphrase == "" {
-							f.status = "⚠️ 请先填口令再导出"
+							f.status = "⚠️ 请先填加密口令再导出"
 						} else if path, err := backup.ExportTo(a.Store.DB, a.Paths, f.passphrase); err != nil {
 							f.status = "❌ 导出失败：" + err.Error()
 						} else {
@@ -355,7 +361,7 @@ func (a *App) prefsView(c *ui.Context) {
 					}
 					if ui.Button(c, "导入备份…").Clicked() {
 						if f.passphrase == "" {
-							f.status = "⚠️ 请先填口令再导入"
+							f.status = "⚠️ 请先填加密口令再导入"
 						} else if path := a.pickBackupFile(); path == "" {
 							f.status = "已取消导入"
 						} else if report, err := backup.Import(a.Store.DB, path, f.passphrase); err != nil {

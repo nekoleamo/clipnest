@@ -42,11 +42,28 @@ irm https://gitee.com/null_593_5354/clipnest/raw/main/install.ps1 | iex
 只有用浏览器直接下 zip 才需要「右键 → 打开」或 `xattr -dr com.apple.quarantine`。
 一键脚本会校验 `SHA256SUMS`，不符就中止、什么都不装。
 
+## 两端同步怎么填（WebDAV + 端到端加密）
+
+设置 → 同步，两台机器各填一次。**两个口令是两回事**，分别存进系统凭据：
+
+| 填哪 | 存成 | 要求 |
+| --- | --- | --- |
+| WebDAV 用户名 / **WebDAV 账号口令** | `clipnest-webdav/<本机名称>`（Windows 凭据管理器 / macOS 钥匙串） | NAS 上那个账号的密码，各设备可以不同 |
+| **加密口令** | `clipnest-sync/<本机名称>` | 端到端加密与 `.cnbak` 备份共用；**两台机器必须同一个字符串**，否则拉下来解不开 |
+
+- 本机名称默认取主机名，别两台填成一样（远端文件名按它区分：`<本机名称>.json`）。
+- 改了本机名称 → 口令按新名字找，读不到旧的，重填一次即可。
+- NAS 用自签证书时勾**「允许自签证书」**（等效 `InsecureSkipVerify`，局域网与备用地址一并生效）；
+  不想降级就把 NAS 的根证书导进系统信任库，然后不勾。
+- 口令只从设置窗改：Windows 凭据管理器 GUI 存的是 UTF-16，和 app 读的 UTF-8 字节不匹配。
+- 排查：面板底栏/设置窗会直接写错误原文 —— `PROPFIND: 401 Unauthorized` 是 WebDAV 口令不对，
+  `x509: certificate signed by unknown authority` 是自签证书没勾，`…里没有同步口令` 是加密口令没写进去。
+
 ## 开发
 
 ```bash
 go build ./...                   # 编译
-go test ./...                    # 测试（184 项）
+go test ./...                    # 测试（185 项）
 go vet ./...
 GOOS=windows go build ./...      # Windows 交叉编译
 go tool mygo build               # 打包 .app 与 dmg
@@ -79,7 +96,7 @@ docs/                路线图、执行计划、发布流程
 | `docs/路线图.md` | 产品定位、技术决策、阶段状态、**12 条行为契约** |
 | `docs/执行计划-下一步.md` | 当前状态与待做事项 |
 | `docs/发布.md` | 打包、发版、双源分发、Homebrew / Scoop |
-| `docs/变更记录.md` | 版本变更摘要（当前 1.3.0） |
+| `docs/变更记录.md` | 版本变更摘要（当前 1.3.1） |
 | `docs/windows-能力对照.md` | 逐项对照 macOS 能力在 Windows 的等价实现与验证状态 |
 | `AGENTS.md` | 协作约定与框架坑位（开发前必读） |
 | `docs/nsh-时代的历史坑.md` | nsh 0.5.1 与 Rust 时代的实测坑（历史参考） |

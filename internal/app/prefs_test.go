@@ -167,6 +167,7 @@ func TestPrefsSaveWritesSettings(t *testing.T) {
 // TestPrefsSaveKeepsPassphraseIndependentOfBackend 本地目录模式也要能设口令：
 // 加密与备份都靠它，以前这个输入框只在 WebDAV 分支里出现。
 func TestPrefsSaveKeepsPassphraseIndependentOfBackend(t *testing.T) {
+	writes := stubSecrets(t, "")
 	a, tt := newPrefsTester(t)
 	f := a.PrefsForm()
 	if f.backendKind != 0 {
@@ -183,6 +184,46 @@ func TestPrefsSaveKeepsPassphraseIndependentOfBackend(t *testing.T) {
 	}
 	if got := a.PrefsForm().passphrase; got != "" {
 		t.Fatalf("保存后口令应当从草稿里清掉，实际 %q", got)
+	}
+	if len(*writes) != 1 || !strings.HasPrefix((*writes)[0], sync.SecretService+"/") {
+		t.Fatalf("只该写一条加密口令，实际 %v", *writes)
+	}
+}
+
+// TestPrefsSaveWritesBothSecretsSeparately WebDAV 账号口令与加密口令各写各的条目，
+// 允许不同（以前一个框写两处，NAS 密码和加密口令只能填同一个）。
+func TestPrefsSaveWritesBothSecretsSeparately(t *testing.T) {
+	writes := stubSecrets(t, "")
+	a, tt := newPrefsTester(t)
+	f := a.PrefsForm()
+	f.backendKind = 1
+	f.remoteURL = "https://nas.local:5006"
+	f.remoteUser = "nekoleamo"
+	f.webdavPass = "nas-pw"
+	f.passphrase = "很长很长的加密口令"
+	f.encrypt = true
+	if err := tt.Click("保存"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+
+	want := map[string]string{
+		sync.SecretService + "/" + f.deviceName:       "很长很长的加密口令",
+		sync.WebDavSecretService + "/" + f.deviceName: "nas-pw",
+	}
+	got := map[string]string{}
+	for _, w := range *writes {
+		if k, v, ok := strings.Cut(w, " = "); ok {
+			got[k] = v
+		}
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Fatalf("%s 应当是 %q，实际 %q（写入 %v）", k, v, got[k], *writes)
+		}
+	}
+	if a.PrefsForm().webdavPass != "" {
+		t.Fatal("保存后 WebDAV 口令应当从草稿里清掉")
 	}
 }
 
@@ -501,15 +542,25 @@ func TestClearAllUsesSavedPassphrase(t *testing.T) {
 	}
 }
 
-// stubSecrets 替掉系统凭据读取（headless 下读钥匙串会等主线程）。
-func stubSecrets(t *testing.T, passphrase string) {
+// stubSecrets 替掉系统凭据的读写。
+//
+// 必须替：macOS 那份实现直接调 Security 框架、不看有没有事件循环，不替的话测试会
+// **真往登录钥匙串里写**（踩过，留下了一条 clipnest-sync/<主机名>-local）。
+// 返回的 *[]string 记录每次写入，形如 "clipnest-sync/设备名 = 值"。
+func stubSecrets(t *testing.T, passphrase string) *[]string {
 	t.Helper()
-	old := secretGet
+	var writes []string
+	oldGet, oldSet := secretGet, secretSet
 	secretGet = func(string, string) (string, error) {
 		if passphrase == "" {
 			return "", errors.New("没存过")
 		}
 		return passphrase, nil
 	}
-	t.Cleanup(func() { secretGet = old })
+	secretSet = func(service, key, value string) error {
+		writes = append(writes, service+"/"+key+" = "+value)
+		return nil
+	}
+	t.Cleanup(func() { secretGet, secretSet = oldGet, oldSet })
+	return &writes
 }
