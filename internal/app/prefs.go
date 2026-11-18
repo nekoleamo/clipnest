@@ -275,7 +275,7 @@ func (a *App) prefsView(c *ui.Context) {
 
 		ui.Divider(c)
 		ui.Text(c, "版本与更新").FontSize(14).Bold().TextColor(th.Text)
-		label(c, fmt.Sprintf("当前版本 %s · 只检查不自动装（未签名，装包要你自己点）· 国内建议更新源选 Gitee", a.AppVersion()), th)
+		label(c, fmt.Sprintf("当前版本 %s · 只检查不自动装（未签名，装包要你自己点）", a.AppVersion()), th)
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			// 更新源下拉：切了就立刻存（不然点「检查更新」还按旧源跑）
 			srcIdx := update.IndexOf(*a.UpdateSourceDraft())
@@ -285,7 +285,7 @@ func (a *App) prefsView(c *ui.Context) {
 				chosen := update.SourceOf(pick)
 				a.later(func() { a.switchUpdateSource(chosen) })
 			}
-			ui.TextInput(c, a.UpdateRepoDraft()).Placeholder("仓库 owner/repo").Grow(1)
+			ui.TextInput(c, a.UpdateRepoDraft()).Placeholder("仓库（留空用内置镜像）").Grow(1)
 			if ui.Button(c, "保存更新源").Clicked() {
 				a.later(func() {
 					a.SaveUpdateSource(*a.UpdateSourceDraft(), *a.UpdateRepoDraft(), *a.UpdateAPIBaseDraft())
@@ -293,12 +293,15 @@ func (a *App) prefsView(c *ui.Context) {
 			}
 		})
 
-		// 自定义源单独一行：API 根很长，与上面那行挤在一起会溢出
-		if *a.UpdateSourceDraft() == update.SourceCustom {
+		// 自定义源要填 API 根，自动源给一句说明：都很长，各占一行（与上面那行挤会溢出）
+		switch *a.UpdateSourceDraft() {
+		case update.SourceCustom:
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, "API 根").FontSize(11).TextColor(th.TextMuted)
 				ui.TextInput(c, a.UpdateAPIBaseDraft()).Placeholder("https://api.github.com").Grow(1)
 			})
+		case update.SourceAuto:
+			label(c, "自动：先查 Gitee，不通再查 GitHub（国内推荐）", th)
 		}
 
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {

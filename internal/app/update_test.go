@@ -65,19 +65,46 @@ func TestCheckUpdateReportsNewer(t *testing.T) {
 	}
 }
 
-// TestCheckUpdateWithoutRepo 没填更新源时给引导，不发请求。
+// TestCheckUpdateWithoutRepo 仓库留空时用该源上的内置镜像仓库名；自定义源没有内置名，要提示。
 func TestCheckUpdateWithoutRepo(t *testing.T) {
-	hits := fakeRelease(t, "v1.0.1")
-	a := newTestApp(t)
-	a.Settings.ReleaseRepo = ""
+	var gotPath string
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"tag_name":"v1.0.1"}`))
+	}))
+	defer srv.Close()
+	old := updateClient
+	updateClient = func(string, string, string) update.Client {
+		return update.Client{APIBase: srv.URL, HTTP: srv.Client()}
+	}
+	defer func() { updateClient = old }()
 
+	a := newTestApp(t)
+	a.Settings.ReleaseSource = update.SourceGitee
+	a.Settings.ReleaseRepo = ""
+	a.CheckUpdate()
+	_ = waitStatus(t, a)
+	if hits == 0 {
+		t.Fatal("仓库留空应当回落到内置镜像仓库名，而不是什么都不查")
+	}
+	if want := "/repos/" + a.UpdateRepoFor(update.SourceGitee) + "/releases/latest"; gotPath != want {
+		t.Fatalf("查询路径不对：%q，期望 %q", gotPath, want)
+	}
+
+	// 自定义源没有内置镜像名：给引导，不发请求
+	hits = 0
+	a.Settings.ReleaseSource = update.SourceCustom
+	a.Settings.ReleaseRepo = ""
+	a.SetUpdateStatus("")
 	a.CheckUpdate()
 	msg, _ := a.UpdateStatus()
-	if !strings.Contains(msg, "更新源") {
-		t.Fatalf("应当提示先填更新源：%q", msg)
+	if !strings.Contains(msg, "仓库") {
+		t.Fatalf("应当提示先填仓库：%q", msg)
 	}
-	if *hits != 0 {
-		t.Fatal("没填更新源不该发请求")
+	if hits != 0 {
+		t.Fatal("自定义源没填仓库不该发请求")
 	}
 }
 
@@ -198,5 +225,93 @@ func TestUpdateRepoFor(t *testing.T) {
 	}
 	if got := a.UpdateRepoFor(update.SourceCustom); got != "" {
 		t.Fatalf("自定义源不该猜仓库名：%q", got)
+	}
+}
+
+// TestCheckUpdateAutoFallsBack auto 源：Gitee 查不通时自动换 GitHub，并在提示里写明实际源。
+func TestCheckUpdateAutoFallsBack(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"tag_name":"v1.0.0"}`))
+	}))
+	defer srv.Close()
+
+	var tried []string
+	old := updateClient
+	updateClient = func(source, _, _ string) update.Client {
+		tried = append(tried, source)
+		if source == update.SourceGitee {
+			// 端口 1 上没人：连不上会立刻失败
+			return update.Client{APIBase: "http://127.0.0.1:1", HTTP: srv.Client()}
+		}
+		return update.Client{APIBase: srv.URL, HTTP: srv.Client(), WebBase: "https://github.com"}
+	}
+	defer func() { updateClient = old }()
+
+	a := newTestApp(t)
+	a.Settings.ReleaseSource = update.SourceAuto
+	a.Settings.ReleaseRepo = "me/repo"
+	a.CheckUpdate()
+	msg := waitStatus(t, a)
+
+	if len(tried) != 2 || tried[0] != update.SourceGitee || tried[1] != update.SourceGitHub {
+		t.Fatalf("候选顺序不对：%v", tried)
+	}
+	if !strings.Contains(msg, "已是最新") && !strings.Contains(msg, "有新版本") {
+		t.Fatalf("换源后应当拿到结果：%q", msg)
+	}
+	if !strings.Contains(msg, "源 "+update.SourceGitHub) {
+		t.Fatalf("提示里应写明实际用的源：%q", msg)
+	}
+}
+
+// TestCheckUpdateAutoBothFail 两个源都不通：报最后一次的错误，不卡在「检查中」。
+func TestCheckUpdateAutoBothFail(t *testing.T) {
+	old := updateClient
+	updateClient = func(string, string, string) update.Client {
+		return update.Client{APIBase: "http://127.0.0.1:1"}
+	}
+	defer func() { updateClient = old }()
+
+	a := newTestApp(t)
+	a.Settings.ReleaseSource = update.SourceAuto
+	a.Settings.ReleaseRepo = "me/repo"
+	a.CheckUpdate()
+	msg := waitStatus(t, a)
+	if !strings.HasPrefix(msg, "❌") {
+		t.Fatalf("都失败要给 ❌：%q", msg)
+	}
+	if a.UpdateChecking() {
+		t.Fatal("失败后不该还标着「检查中」")
+	}
+}
+
+// TestCheckUpdateAutoUsesPerSourceRepo auto + 仓库留空：换到 GitHub 时要用 GitHub 上的镜像名，
+// 而不是把 Gitee 的仓库名照抄过去（那样必然 404）。
+func TestCheckUpdateAutoUsesPerSourceRepo(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`{"tag_name":"v1.0.0"}`))
+	}))
+	defer srv.Close()
+
+	old := updateClient
+	updateClient = func(source, _, _ string) update.Client {
+		if source == update.SourceGitee {
+			return update.Client{APIBase: "http://127.0.0.1:1", HTTP: srv.Client()}
+		}
+		return update.Client{APIBase: srv.URL, HTTP: srv.Client(), WebBase: "https://github.com"}
+	}
+	defer func() { updateClient = old }()
+
+	a := newTestApp(t)
+	a.Settings.ReleaseSource = update.SourceAuto
+	a.Settings.ReleaseRepo = ""
+	a.CheckUpdate()
+	_ = waitStatus(t, a)
+
+	want := "/repos/" + a.UpdateRepoFor(update.SourceGitHub) + "/releases/latest"
+	if gotPath != want {
+		t.Fatalf("换源后仓库名没跟着换：%q，期望 %q", gotPath, want)
 	}
 }

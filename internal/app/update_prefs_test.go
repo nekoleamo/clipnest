@@ -27,6 +27,21 @@ func TestPrefsUpdateSourceRows(t *testing.T) {
 		t.Fatal("非自定义源不该显示 API 根那行")
 	}
 
+	// 自动源：给一句说明，且不该出现 API 根输入框
+	a.Settings.ReleaseSource = update.SourceAuto
+	a.mu.Lock()
+	a.releaseSourceDraft = ""
+	a.mu.Unlock()
+	t3 := ui.NewTester(a.PrefsView, 620, 720)
+	t3.Frame()
+	t3.Frame()
+	if _, ok := t3.Find("自动：先查 Gitee，不通再查 GitHub（国内推荐）"); !ok {
+		t.Fatal("自动源没给出说明")
+	}
+	if _, ok := t3.Find("API 根"); ok {
+		t.Fatal("自动源不该显示 API 根那行")
+	}
+
 	a.Settings.ReleaseSource = update.SourceCustom
 	a.Settings.ReleaseRepo = "me/repo"
 	a.mu.Lock()

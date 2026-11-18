@@ -3,6 +3,8 @@ package app
 
 import (
 	"context"
+	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 
@@ -15,8 +17,9 @@ var updateClient = update.ClientFor
 
 // 各更新源上的本仓镜像名：切源时库里自带的这对名能直接拿来用。
 var sourceRepos = map[string]string{
-	update.SourceGitHub: "nekoleamo/clipnest",
 	update.SourceGitee:  "null_593_5354/clipnest",
+	update.SourceGitHub: "nekoleamo/clipnest",
+	update.SourceAuto:   "null_593_5354/clipnest", // auto 先走 Gitee
 }
 
 // UpdateRepoDraft 是设置窗里「仓库」输入框的绑定值。
@@ -103,12 +106,19 @@ func (a *App) CheckUpdate() {
 	source := a.Settings.ReleaseSource
 	apiBase := a.Settings.ReleaseAPIBase
 	busy := a.updateBusy
+	// builtin：仓库名是回落到内置镜像的，换源时要用目标源自己的那套名
+	builtin := false
 	if busy {
 		a.mu.Unlock()
 		return
 	}
 	if repo == "" {
-		a.updateMsg = "先在下面填更新源（形如 owner/repo），再点检查"
+		// 留空就用该源上的内置镜像仓库名（gitee 是默认源），开箱即可查
+		builtin = true
+		repo = a.UpdateRepoFor(source)
+	}
+	if repo == "" {
+		a.updateMsg = "先在下面填仓库（形如 owner/repo），再点检查"
 		a.mu.Unlock()
 		a.invalidatePrefs()
 		return
@@ -131,22 +141,63 @@ func (a *App) CheckUpdate() {
 			a.mu.Unlock()
 			a.invalidatePrefs()
 		}()
-		client := updateClient(source, apiBase, mygo.App.Version())
-		rel, err := client.Latest(context.Background(), repo)
-		if err != nil {
-			a.SetUpdateStatus("❌ " + err.Error())
+		// auto 模式：按候选顺序试（先 Gitee，不行自动换 GitHub），每个候选的等待时间也收紧
+		cands := update.Candidates(source)
+		wait := 8 * time.Second
+		if len(cands) > 1 {
+			wait = 5 * time.Second
+		}
+		version := mygo.App.Version()
+		var (
+			rel     update.Release
+			used    string
+			lastErr error
+		)
+		for _, cand := range cands {
+			// 仓库名留空时，每个候选都换成它自己那套镜像名
+			// （Gitee 叫 null_593_5354/clipnest、GitHub 叫 nekoleamo/clipnest）
+			tryRepo := repo
+			if builtin {
+				tryRepo = a.UpdateRepoFor(cand)
+			}
+			tryRepo = strings.Trim(tryRepo, "/")
+			if tryRepo == "" {
+				continue
+			}
+			client := updateClient(cand, apiBase, version)
+			ctx, cancel := context.WithTimeout(context.Background(), wait)
+			rel, lastErr = client.Latest(ctx, tryRepo)
+			cancel()
+			if lastErr == nil {
+				used = cand
+				break
+			}
+			if len(cands) > 1 {
+				logf("UPDATE source %s (%s) failed: %v", cand, tryRepo, lastErr)
+			}
+		}
+		if used == "" {
+			if lastErr == nil {
+				a.SetUpdateStatus("❌ 没有可用的更新源")
+				return
+			}
+			a.SetUpdateStatus("❌ " + lastErr.Error())
 			return
 		}
 		current := mygo.App.Version()
 		a.mu.Lock()
 		a.updateURL = rel.URL
 		a.mu.Unlock()
+		srcNote := ""
+		if used != source {
+			srcNote = "，源 " + used
+		}
 		if update.Newer(current, rel.Tag) {
-			a.SetUpdateStatus("🆕 有新版本 " + rel.Tag + "（当前 " + current + "）")
-			logf("UPDATE newer current=%s latest=%s", current, rel.Tag)
+			a.SetUpdateStatus("🆕 有新版本 " + rel.Tag + "（当前 " + current + srcNote + "）")
+			logf("UPDATE newer current=%s latest=%s source=%s", current, rel.Tag, used)
 			return
 		}
-		a.SetUpdateStatus("✅ 已是最新（" + current + "，最新 " + rel.Tag + "）")
+		a.SetUpdateStatus("✅ 已是最新（" + current + "，最新 " + rel.Tag + srcNote + "）")
 	}()
 }
 

@@ -46,8 +46,8 @@ type Settings struct {
 	Shortcut string `json:"shortcut"`
 	// ReleaseRepo 是「检查更新」用的仓库（owner/repo）；留空表示不检查。
 	ReleaseRepo string `json:"release_repo"`
-	// ReleaseSource 是更新源：github（默认）/ gitee / custom。
-	// 国内直连 GitHub 常是「API 通、资产断」，换成 gitee 就快得多。
+	// ReleaseSource 是更新源：gitee（默认）/ github / auto / custom。
+	// 国内直连 GitHub 常是「API 通、资产断」，所以默认 gitee；auto = 先 Gitee 不行再 GitHub。
 	ReleaseSource string `json:"release_source"`
 	// ReleaseAPIBase 只在 ReleaseSource=custom 时生效，填 API 根（例如自建反代）。
 	ReleaseAPIBase string `json:"release_api_base"`
@@ -66,7 +66,7 @@ func Default() Settings {
 		IgnoreSensitiveApps: true,
 		ExportDir:           "",
 		ReleaseRepo:         "",
-		ReleaseSource:       "github",
+		ReleaseSource:       "gitee",
 		Shortcut:            DefaultShortcut,
 	}
 }
@@ -97,9 +97,9 @@ func Normalize(s Settings) Settings {
 	}
 	s.ReleaseSource = strings.ToLower(strings.TrimSpace(s.ReleaseSource))
 	switch s.ReleaseSource {
-	case "github", "gitee", "custom":
+	case "github", "gitee", "auto", "custom":
 	default:
-		s.ReleaseSource = "github"
+		s.ReleaseSource = "gitee"
 	}
 	s.ReleaseAPIBase = strings.TrimRight(strings.TrimSpace(s.ReleaseAPIBase), "/")
 	s.ReleaseRepo = strings.Trim(strings.TrimSpace(s.ReleaseRepo), "/")

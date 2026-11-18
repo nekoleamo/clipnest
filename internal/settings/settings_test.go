@@ -79,3 +79,19 @@ func TestOutOfRangeValuesAreClamped(t *testing.T) {
 		t.Fatalf("下限裁剪：%+v", low)
 	}
 }
+
+// TestDefaultUpdateSourceIsGitee 更新源默认走 Gitee（国内直连 GitHub 常断），
+// 且 auto / custom 这类取值不会被 Normalize 拉回默认。
+func TestDefaultUpdateSourceIsGitee(t *testing.T) {
+	if got := Default().ReleaseSource; got != "gitee" {
+		t.Fatalf("默认更新源应当�� gitee，实际 %q", got)
+	}
+	for _, src := range []string{"gitee", "github", "auto", "custom"} {
+		if got := Normalize(Settings{ReleaseSource: src}).ReleaseSource; got != src {
+			t.Fatalf("Normalize 把 %q 改成了 %q", src, got)
+		}
+	}
+	if got := Normalize(Settings{ReleaseSource: "npm"}).ReleaseSource; got != "gitee" {
+		t.Fatalf("不认识的源应当回落到 gitee，实际 %q", got)
+	}
+}

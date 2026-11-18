@@ -27,20 +27,22 @@ type Release struct {
 	CreatedAt string `json:"created_at"`
 }
 
-// 更新源。国内直连 GitHub 常是「API 通、下载断」，gitee 是给这种网络留的。
+// 更新源。国内直连 GitHub 常是「API 通、下载断」，所以默认走 gitee。
 const (
-	SourceGitHub = "github"
 	SourceGitee  = "gitee"
+	SourceGitHub = "github"
+	// SourceAuto 是「先 Gitee，不行再 GitHub」，与安装脚本的 auto 一致。
+	SourceAuto   = "auto"
 	SourceCustom = "custom"
 )
 
 // SourceLabels 是设置窗下拉里显示的文案（顺序与 Sources 一致）。
-var SourceLabels = []string{"GitHub", "Gitee", "自定义"}
+var SourceLabels = []string{"Gitee", "GitHub", "自动", "自定义"}
 
 // Sources 是 SourceLabels 对应的取值。
-var Sources = []string{SourceGitHub, SourceGitee, SourceCustom}
+var Sources = []string{SourceGitee, SourceGitHub, SourceAuto, SourceCustom}
 
-// IndexOf 返回 source 在 Sources 里的下标（不认识的归到 GitHub）。
+// IndexOf 返回 source 在 Sources 里的下标（不认识的归到第一个，即 Gitee）。
 func IndexOf(source string) int {
 	source = strings.ToLower(strings.TrimSpace(source))
 	for i, s := range Sources {
@@ -49,6 +51,15 @@ func IndexOf(source string) int {
 		}
 	}
 	return 0
+}
+
+// Candidates 是「按这个源查一次更新」时要依次尝试的源。
+// auto 展开为 [gitee github]（两个都试，前一个失败自动换第二个）；其他只自己一个。
+func Candidates(source string) []string {
+	if strings.ToLower(strings.TrimSpace(source)) == SourceAuto {
+		return []string{SourceGitee, SourceGitHub}
+	}
+	return []string{source}
 }
 
 // SourceOf 是 SourceLabels 里的文案对应的取值（不认识的归到 GitHub）。
@@ -93,7 +104,8 @@ func DefaultClient(version string) Client {
 	}
 }
 
-// ClientFor 按更新源给出客户端：github / gitee 用内置根，custom 用 apiBase。
+// ClientFor 按更新源给出客户端：gitee / github 用内置根，custom 用 apiBase。
+// auto 在这里退到它的第一个候选（实际换源由 Candidates 负责）；
 // apiBase 为空的自定义源会退到默认（否则只能报「没有更新源」）。
 func ClientFor(source, apiBase, version string) Client {
 	c := DefaultClient(version)
@@ -101,6 +113,8 @@ func ClientFor(source, apiBase, version string) Client {
 	case SourceGitee:
 		c.APIBase = "https://gitee.com/api/v5"
 		c.WebBase = "https://gitee.com"
+	case SourceAuto:
+		return ClientFor(SourceGitee, apiBase, version)
 	case SourceCustom:
 		switch base := strings.TrimRight(strings.TrimSpace(apiBase), "/"); {
 		case base != "":

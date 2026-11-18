@@ -157,9 +157,13 @@ func TestClientForSources(t *testing.T) {
 	if empty := ClientFor(SourceCustom, "  ", "v1"); empty.APIBase != "https://api.github.com" {
 		t.Fatalf("空自定义源没兜底：%q", empty.APIBase)
 	}
-	// 不认识的值按 GitHub 处理
+	// 不认识的值按默认（GitHub 根，ClientFor 的 fallthrough）处理
 	if bad := ClientFor("npm", "", "v1"); bad.APIBase != "https://api.github.com" {
 		t.Fatalf("未知源没兜底：%q", bad.APIBase)
+	}
+	// auto 走它的第一个候选
+	if au := ClientFor(SourceAuto, "", "v1"); au.APIBase != "https://gitee.com/api/v5" {
+		t.Fatalf("auto 没退到 gitee：%q", au.APIBase)
 	}
 }
 
@@ -189,6 +193,19 @@ func TestLatestGiteeShape(t *testing.T) {
 	}
 }
 
+// TestCandidates auto 展开为「先 Gitee 再 GitHub」，其他源只自己一个。
+func TestCandidates(t *testing.T) {
+	got := Candidates(SourceAuto)
+	if len(got) != 2 || got[0] != SourceGitee || got[1] != SourceGitHub {
+		t.Fatalf("auto 候选顺序不对：%v", got)
+	}
+	for _, s := range []string{SourceGitee, SourceGitHub, SourceCustom} {
+		if c := Candidates(s); len(c) != 1 || c[0] != s {
+			t.Fatalf("%s 不该有候选：%v", s, c)
+		}
+	}
+}
+
 // TestSourceIndexAndLabels 下拉文案与取值互相对应。
 func TestSourceIndexAndLabels(t *testing.T) {
 	for i, label := range SourceLabels {
@@ -196,7 +213,7 @@ func TestSourceIndexAndLabels(t *testing.T) {
 			t.Fatalf("文案 %q 对不上源：index=%d", label, got)
 		}
 	}
-	if IndexOf("nope") != 0 || SourceOf("Nope") != SourceGitHub {
-		t.Fatal("不认识的源应当归到 GitHub")
+	if IndexOf("nope") != 0 || SourceOf("Nope") != SourceGitee {
+		t.Fatal("不认识的源应当归到第一个候选（Gitee）")
 	}
 }
