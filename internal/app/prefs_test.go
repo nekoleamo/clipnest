@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -406,6 +407,7 @@ func TestShortcutRecorderCancelsOnClickElsewhere(t *testing.T) {
 //
 // 清空不可撤销，墓碑还会随同步推到别的设备，所以留一份能导回来的备份是底线。
 func TestClearAllBacksUpFirst(t *testing.T) {
+	stubSecrets(t, "") // 系统凭据里也取不到口令
 	a := newTestApp(t)
 	record(t, a, "要清掉的条目")
 
@@ -462,14 +464,8 @@ func TestPrefsClearAllNeedsWord(t *testing.T) {
 
 	a.PrefsForm().clearWord = "清空"
 	tt.Frame()
-	if !disabled(tt, "确认清空（先自动备份）") {
-		t.Fatal("只输入解锁词、没有口令时仍然应当禁用（清空前要先备份）")
-	}
-
-	a.PrefsForm().passphrase = "pw-123456"
-	tt.Frame()
 	if disabled(tt, "确认清空（先自动备份）") {
-		t.Fatal("解锁词 + 口令都有了，确认按钮应当可点")
+		t.Fatal("输入解锁词后确认按钮应当可点（口令在点下去时才解析）")
 	}
 	if len(a.Rows()) != 1 {
 		t.Fatal("还没点确认就清了")
@@ -484,4 +480,36 @@ func disabled(tt *ui.Tester, name string) bool {
 		}
 	}
 	return false
+}
+
+// TestClearAllUsesSavedPassphrase 设置窗里没填口令时，用系统凭据里存着的那个来备份。
+func TestClearAllUsesSavedPassphrase(t *testing.T) {
+	stubSecrets(t, "stored-pw-123")
+	a := newTestApp(t)
+	record(t, a, "靠存着的口令备份")
+
+	msg := a.ClearAllHistoryWithBackup("")
+	if len(a.Rows()) != 0 {
+		t.Fatalf("有存着的口令就该备份后清空，实际还剩 %d 条（%s）", len(a.Rows()), msg)
+	}
+	files, _ := filepath.Glob(filepath.Join(a.Paths.BackupsDir(), "*.cnbak"))
+	if len(files) != 1 {
+		t.Fatalf("应当产出备份，实际 %v（%s）", files, msg)
+	}
+	if _, err := backup.Import(a.Store.DB, files[0], "stored-pw-123"); err != nil {
+		t.Fatalf("用存着的口令应当能导回来：%v", err)
+	}
+}
+
+// stubSecrets 替掉系统凭据读取（headless 下读钥匙串会等主线程）。
+func stubSecrets(t *testing.T, passphrase string) {
+	t.Helper()
+	old := secretGet
+	secretGet = func(string, string) (string, error) {
+		if passphrase == "" {
+			return "", errors.New("没存过")
+		}
+		return passphrase, nil
+	}
+	t.Cleanup(func() { secretGet = old })
 }

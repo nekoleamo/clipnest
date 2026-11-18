@@ -16,6 +16,7 @@ import (
 	"clipnest/internal/model"
 	"clipnest/internal/paste"
 	"clipnest/internal/settings"
+	clipsync "clipnest/internal/sync"
 )
 
 // Paste 粘贴一行：写回剪贴板 → 计一次使用 → 收起面板 → 发 ⌘V。
@@ -392,9 +393,13 @@ func (a *App) ClearAllHistory() string {
 //
 // 清空是不可撤销的（墓碑还会随同步推给别的设备，别的机器也跟着没），所以没口令
 // 就不备份、也不清空：宁可让用户先填个口令，也不要一次手滑把整库抹掉。
+// 设置窗里没填的话，用系统凭据里存着的那个同步口令（只在点确认这一下才去读）。
 func (a *App) ClearAllHistoryWithBackup(passphrase string) string {
 	if passphrase == "" {
-		return "⚠️ 没填口令，没法先备份，所以没有清空"
+		passphrase = a.savedPassphrase()
+	}
+	if passphrase == "" {
+		return "⚠️ 没有口令，没法先备份，所以没有清空（在「同步」里填一次口令再来）"
 	}
 	path, err := backup.ExportTo(a.Store.DB, a.Paths, passphrase)
 	if err != nil {
@@ -402,6 +407,21 @@ func (a *App) ClearAllHistoryWithBackup(passphrase string) string {
 		return "❌ 备份失败，没有清空：" + err.Error()
 	}
 	return "已备份 " + baseName(path) + " · " + a.ClearAllHistory()
+}
+
+// secretGet 可注入：headless 测试里读系统凭据会等主线程，直接卡死。
+var secretGet = func(service, key string) (string, error) { return clipsync.SecretGet(service, key) }
+
+// savedPassphrase 是从系统凭据里取已保存的口令（同步加密用的那个，WebDAV 的兜底），
+// 取不到给空串。
+func (a *App) savedPassphrase() string {
+	cfg := clipsync.LoadConfig(a.Paths)
+	for _, service := range []string{clipsync.SecretService, clipsync.WebDavSecretService} {
+		if pw, err := secretGet(service, cfg.DeviceName); err == nil && pw != "" {
+			return pw
+		}
+	}
+	return ""
 }
 
 // reportStatus 把文案写进底栏并原样返回（设置窗自己那行提示要用）。

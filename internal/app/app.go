@@ -186,6 +186,16 @@ func logf(format string, args ...any) {
 	settings.Logf(format, args...)
 }
 
+// settingsSnapshot 拿一份设置的副本。
+//
+// 采集回调不在主线程上（mygo 的 OnChanged 可能并发投递），直接读 a.Settings
+// 会和设置窗的保存撞车，所以读的地方一律走它。
+func (a *App) settingsSnapshot() settings.Settings {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.Settings
+}
+
 // SetStatus 更新面板底部的状态文字。
 func (a *App) SetStatus(text string) {
 	a.mu.Lock()

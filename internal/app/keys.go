@@ -130,11 +130,7 @@ func Slot(index int) string {
 // 键名优先用「物理键位」（PhysicalKey）：mygo 的全局快捷键是按 ANSI 硬编码数字键码注册的，
 // 跟布局无关，用布局相关的 Key 在非美式键盘上会注册成另一个键。
 func AcceleratorFromInput(ev ui.InputEvent) (string, bool) {
-	k := ev.PhysicalKey
-	if k == ui.KeyUnknown {
-		k = ev.Key
-	}
-	name, ok := acceleratorKeyName(k)
+	name, ok := InputKeyName(ev)
 	if !ok {
 		return "", false
 	}
@@ -158,6 +154,17 @@ func AcceleratorFromInput(ev ui.InputEvent) (string, bool) {
 		return "", false
 	}
 	return strings.Join(append(parts, name), "+"), true
+}
+
+// InputKeyName 是这次按键对应的 accelerator 键名（认不出来给 false）。
+//
+// 优先用物理键位：注册那边按 ANSI 硬编码键码，跟键盘布局无关。
+func InputKeyName(ev ui.InputEvent) (string, bool) {
+	k := ev.PhysicalKey
+	if k == ui.KeyUnknown {
+		k = ev.Key
+	}
+	return acceleratorKeyName(k)
 }
 
 // acceleratorKeyName 是 mygo 全局快捷键认的键名（accelerator 语法）。

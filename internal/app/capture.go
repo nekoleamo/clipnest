@@ -26,9 +26,11 @@ func (a *App) Capture() {
 		return
 	}
 
+	// 采集回调可能并发投递（不在主线程），设置要从锁里读一份
+	set := a.settingsSnapshot()
 	sensitiveOn := sensitive.ShouldSkip(sensitive.Config{
-		SensitiveApps:       a.Settings.SensitiveApps,
-		IgnoreSensitiveApps: a.Settings.IgnoreSensitiveApps,
+		SensitiveApps:       set.SensitiveApps,
+		IgnoreSensitiveApps: set.IgnoreSensitiveApps,
 	}, sensitive.FrontApp())
 	if sensitiveOn && cap.Image == nil {
 		logf("CAPTURE skipped sensitive app flavors=%s", snap.Flavors)
@@ -108,7 +110,7 @@ func (a *App) pruneIfDue() {
 
 // Prune 按设置裁剪历史（收藏与置顶受保护）。
 func (a *App) Prune() {
-	n, err := a.Store.Prune(a.Settings.MaxItems)
+	n, err := a.Store.Prune(a.settingsSnapshot().MaxItems)
 	if err != nil {
 		logf("PRUNE ERROR %v", err)
 		return

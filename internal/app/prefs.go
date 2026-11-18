@@ -147,7 +147,9 @@ func (a *App) SavePrefs() {
 		f.status = "❌ 设置保存失败：" + err.Error()
 		return
 	}
+	a.mu.Lock()
 	a.Settings = next
+	a.mu.Unlock()
 	// 面板尺寸是窗口属性：改完立刻生效，不用重启（位置在每次唤出时按设置算）
 	if w := a.panelWindow(); w != nil {
 		width, _ := w.Size()
@@ -251,7 +253,7 @@ func (a *App) prefsView(c *ui.Context) {
 					if a.ClearConfirming() {
 						ui.TextInput(c, &f.clearWord).Placeholder("输入 清空").Width(110)
 						confirm := ui.Button(c, "确认清空（先自动备份）")
-						confirm.Disabled(f.clearWord != "清空" || f.passphrase == "")
+						confirm.Disabled(f.clearWord != "清空")
 						if confirm.Clicked() {
 							f.status = a.ClearAllHistoryWithBackup(f.passphrase)
 							f.clearWord = ""
@@ -265,8 +267,8 @@ func (a *App) prefsView(c *ui.Context) {
 						a.AskClearAll()
 					}
 				})
-				if a.ClearConfirming() && f.passphrase == "" {
-					label(c, "⚠️ 清空前会先导一份加密备份到 backups/，请先在下面「同步」里填口令", th)
+				if a.ClearConfirming() {
+					label(c, "⚠️ 清空前会先导一份加密备份到 backups/（用这里的口令，没填就用系统凭据里存着的；两者都没有就不清）", th)
 				}
 
 				label(c, "敏感应用白名单（每行一个 bundle id / 进程名；留空用内置表）", th)
@@ -501,11 +503,8 @@ func (a *App) shortcutRecorder(c *ui.Context, f *prefsForm, th *ui.Theme) {
 			a.StopShortcutRecord()
 			return true
 		}
-		if _, ok := acceleratorKeyName(ev.PhysicalKey); !ok {
-			_, named := acceleratorKeyName(ev.Key)
-			if !named {
-				return true // 不认识的键（纯粹是修饰键、媒体键之类），接着等
-			}
+		if _, ok := InputKeyName(ev); !ok {
+			return true // 纯修饰键、媒体键这类认不出的键：接着等
 		}
 		f.recordHint = "要按住 ⌘ / ⌃ / ⌥ 再按一个键（⇧ 单独不算；也可以直接按 F1–F12）"
 		return true
@@ -515,9 +514,11 @@ func (a *App) shortcutRecorder(c *ui.Context, f *prefsForm, th *ui.Theme) {
 	}
 }
 
-// HidePrefs 收起设置窗；正在录快捷键就先收尾，否则那个键会一直没挂上。
+// HidePrefs 收起设置窗；正在录快捷键就先收尾（否则那个键会一直没挂上），
+// 清空的「确认态」也一并取消，下次打开不会一上来就是待确认。
 func (a *App) HidePrefs() {
 	a.StopShortcutRecord()
+	a.CancelClearAll()
 	if a.prefs != nil {
 		a.prefs.Hide()
 	}
