@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"clipnest/internal/backup"
 	"clipnest/internal/model"
@@ -50,11 +51,91 @@ func runRound(db *sql.DB, transport Transport, ep Endpoint, deviceID string, p p
 	return report, nil
 }
 
+// PackageKeepDays 是本机留多少天的增量包；更早的由本机自己删掉（别人的包一律不碰）。
+//
+// 留几天的意义：对端离线期间它该拿的增量都还在。对端离线超过这么多天，那几包就没了
+// —— 剪贴板历史按「一次性」对待，这个取舍写在这里，别当成可靠消息队列。
+const PackageKeepDays = 7
+
+// stampLayout 是包名里的时刻：定长 19 位（含毫秒），方便从文件名末尾切出来。
+const stampLayout = "20060102T150405.000"
+
+// stampOf 把 model.Now() 的时刻变成包名里的定长时间戳（解析不了就用当前时刻）。
+func stampOf(at string) string {
+	t, err := time.Parse(model.TimeLayout, at)
+	if err != nil {
+		return time.Now().UTC().Format(stampLayout)
+	}
+	return t.UTC().Format(stampLayout)
+}
+
+// packageName 是远端包名：<设备名>-<时刻>.json。
+//
+// 设备名在前、时刻在末尾定长：本机能按前缀认出自己的包来清理，也能从末尾切出时刻。
+func packageName(device, at string) string { return device + "-" + stampOf(at) + ".json" }
+
+// parsePackageName 拆包名；旧格式（只有 <设备名>.json，没有时刻）返回 ok=false，
+// 那种包照样会被拉下来合并，只是没法按时刻跳过/清理。
+func parsePackageName(name string) (device, stamp string, ok bool) {
+	base := strings.TrimSuffix(name, ".json")
+	n := len(stampLayout)
+	if len(base) < n+2 || base[len(base)-n-1] != '-' {
+		return "", "", false
+	}
+	stamp = base[len(base)-n:]
+	if _, err := time.Parse(stampLayout, stamp); err != nil {
+		return "", "", false
+	}
+	return base[:len(base)-n-1], stamp, true
+}
+
+// seenStamp 是本机已经吃过的、某设备最新的包时刻。
+func seenStamp(db *sql.DB, device string) string {
+	var at string
+	err := db.QueryRow("SELECT value FROM meta WHERE key = ?", "sync_seen_"+device).Scan(&at)
+	if err != nil {
+		return ""
+	}
+	return at
+}
+
+// setSeenStamp 记下「这台设备的包吃到这一刻了」。
+func setSeenStamp(db *sql.DB, device, stamp string) error {
+	_, err := db.Exec(`INSERT INTO meta(key, value) VALUES (?, ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, "sync_seen_"+device, stamp)
+	return err
+}
+
+// freePackageName 返回一个还没被占用的包名：同一毫秒里连推两轮时把时刻往后挪一格，
+// 否则后一轮会把前一轮覆盖掉（那就又变成「只留最近一次增量」了）。
+func freePackageName(device, at string, existing []string) string {
+	name := packageName(device, at)
+	taken := map[string]bool{}
+	for _, n := range existing {
+		taken[n] = true
+	}
+	ts, err := time.Parse(stampLayout, stampOf(at))
+	if err != nil {
+		return name
+	}
+	for taken[name] {
+		ts = ts.Add(time.Millisecond)
+		name = packageName(device, ts.UTC().Format(model.TimeLayout))
+	}
+	return name
+}
+
 // syncRound 把本地增量推上去，再把别的设备的增量拉下来合并。
 func syncRound(db *sql.DB, transport Transport, deviceID string, p paths.Paths, encode, decode Coder) (SyncReport, error) {
 	var report SyncReport
 
-	// 1) 推：只发上次导出之后的变更
+	// 先看一眼远端有哪些包：推的时候要避开已占用的名字，拉的时候用同一份清单
+	names, err := transport.List()
+	if err != nil {
+		return report, err
+	}
+
+	// 1) 推：只发上次导出之后的变更，一包一个文件（<设备名>-<时刻>.json），互不覆盖
 	since, err := lastExport(db)
 	if err != nil {
 		return report, err
@@ -79,7 +160,7 @@ func syncRound(db *sql.DB, transport Transport, deviceID string, p paths.Paths, 
 		if err != nil {
 			return report, err
 		}
-		if err := transport.Put(deviceID+".json", sealed); err != nil {
+		if err := transport.Put(freePackageName(deviceID, exportedAt, names), sealed); err != nil {
 			return report, err
 		}
 		report.Pushed = len(pkg.Changes)
@@ -90,14 +171,18 @@ func syncRound(db *sql.DB, transport Transport, deviceID string, p paths.Paths, 
 		return report, err
 	}
 
-	// 2) 拉：别的设备的包
-	names, err := transport.List()
-	if err != nil {
-		return report, err
-	}
+	// 2) 拉：别人的包；自己的、以及已经吃过的按包名跳过
 	for _, name := range names {
-		if name == deviceID+".json" {
-			continue
+		owner, stamp, stamped := parsePackageName(name)
+		if stamped {
+			if owner == deviceID {
+				continue // 自己的包
+			}
+			if stamp <= seenStamp(db, owner) {
+				continue // 这一包（以及更早的）已经合并过了
+			}
+		} else if name == deviceID+".json" {
+			continue // 旧格式的自打包
 		}
 		sealed, err := transport.Get(name)
 		if err != nil {
@@ -125,8 +210,36 @@ func syncRound(db *sql.DB, transport Transport, deviceID string, p paths.Paths, 
 		}
 		report.Applied.merge(applied)
 		report.BlobsPulled += pullBlobs(transport, p, pkg.Changes)
+		// 吃起来哪一包就记到哪：下一轮不再重复下载（合并是幂等的，重复也没事，只是费流量）
+		at := stampOf(pkg.ExportedAt)
+		if stamped {
+			at = stamp
+		}
+		if err := setSeenStamp(db, pkg.DeviceID, at); err != nil {
+			return report, err
+		}
 	}
+
+	// 3) 清理：自己的包留 PackageKeepDays 天，别人的一律不碰。
+	//    删的原因是文件名不再覆盖，长期用下来会越攒越多。
+	cleanupOwnPackages(transport, deviceID, names)
 	return report, nil
+}
+
+// cleanupOwnPackages 删掉本机超过保留期的增量包。
+//
+// 只删自己的：别人的包什么时候能删，由那台机器自己判断（它才知道对端拉没拉过）。
+func cleanupOwnPackages(transport Transport, device string, names []string) {
+	cutoff := time.Now().UTC().AddDate(0, 0, -PackageKeepDays).Format(stampLayout)
+	for _, name := range names {
+		owner, stamp, ok := parsePackageName(name)
+		if !ok || owner != device || stamp >= cutoff {
+			continue
+		}
+		if err := transport.Remove(name); err != nil {
+			Logf("SYNC 清理旧包 %s 失败：%v", name, err)
+		}
+	}
 }
 
 // lastExport 读上次导出的时间点。

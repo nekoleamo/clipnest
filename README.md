@@ -51,11 +51,24 @@ irm https://gitee.com/null_593_5354/clipnest/raw/main/install.ps1 | iex
 | WebDAV 用户名 / **WebDAV 账号口令** | `clipnest-webdav/<本机名称>`（Windows 凭据管理器 / macOS 钥匙串） | NAS 上那个账号的密码，各设备可以不同 |
 | **加密口令** | `clipnest-sync/<本机名称>` | 端到端加密与 `.cnbak` 备份共用；**两台机器必须同一个字符串**，否则拉下来解不开 |
 
-- 本机名称默认取主机名，别两台填成一样（远端文件名按它区分：`<本机名称>.json`）。
+远端目录里长这样：每台机器**各写自己的包**，互不覆盖。
+
+```
+/data/clipnest/
+├── mac-a-20261119T012345.678.json   ← Mac 每一轮增量一包（文件名带时刻）
+├── mac-b-20261119T013012.101.json   ← Windows 同理
+├── mac-a.json / mac-b.json          ← 1.3.2 及更早的旧格式（还能读，两台都升级后可手删）
+└── blobs/ab/abcdef…png              ← 图片原图，按内容哈希命名，两台共用一份
+```
+
+- **本机名称必须两台不同**：文件名按它区分，填成一样会互相覆盖、同步直接失效（最常见的踩法是把
+  一端的 `sync.json` 拷到另一端）。
 - 改了本机名称 → 口令按新名字找，读不到旧的，重填一次即可。
 - NAS 用自签证书时勾**「允许自签证书」**（等效 `InsecureSkipVerify`，局域网与备用地址一并生效）；
   不想降级就把 NAS 的根证书导进系统信任库，然后不勾。
 - 口令只从设置窗改：Windows 凭据管理器 GUI 存的是 UTF-16，和 app 读的 UTF-8 字节不匹配。
+- 增量包在本机保留 7 天（`sync.PackageKeepDays`）：对端离线期间该拿的包都还在，回来一次补全。
+  超过 7 天且对端一直没上线的，那几包会被本机自己删掉 —— 剪贴板历史按一次性对待，不做可靠队列。
 - 排查：面板底栏/设置窗会直接写错误原文 —— `PROPFIND: 401 Unauthorized` 是 WebDAV 口令不对，
   `x509: certificate signed by unknown authority` 是自签证书没勾，`…里没有同步口令` 是加密口令没写进去。
 
@@ -63,7 +76,7 @@ irm https://gitee.com/null_593_5354/clipnest/raw/main/install.ps1 | iex
 
 ```bash
 go build ./...                   # 编译
-go test ./...                    # 测试（186 项）
+go test ./...                    # 测试（190 项）
 go vet ./...
 GOOS=windows go build ./...      # Windows 交叉编译
 go tool mygo build               # 打包 .app 与 dmg
@@ -96,7 +109,7 @@ docs/                路线图、执行计划、发布流程
 | `docs/路线图.md` | 产品定位、技术决策、阶段状态、**12 条行为契约** |
 | `docs/执行计划-下一步.md` | 当前状态与待做事项 |
 | `docs/发布.md` | 打包、发版、双源分发、Homebrew / Scoop |
-| `docs/变更记录.md` | 版本变更摘要（当前 1.3.2） |
+| `docs/变更记录.md` | 版本变更摘要（当前 1.3.3） |
 | `docs/windows-能力对照.md` | 逐项对照 macOS 能力在 Windows 的等价实现与验证状态 |
 | `AGENTS.md` | 协作约定与框架坑位（开发前必读） |
 | `docs/nsh-时代的历史坑.md` | nsh 0.5.1 与 Rust 时代的实测坑（历史参考） |
