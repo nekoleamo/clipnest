@@ -2,7 +2,7 @@
 # install.sh 的端到端测试：起一个假的「发行版服务器」，跑真实安装流程。
 #
 # 覆盖：正常安装（含 SHA256 校验与 quarantine 清理）、哈希不符必须中止、
-#       auto 源在 GitHub 不通时切到 Gitee。
+#       auto 源在 GitHub 不通时切到 Gitee、auto 源首选源坏掉时换源重试。
 #
 # 只看结果，不碰真实数据：安装目录是临时目录，且 CLIPNEST_NO_KILL=1 不会去关真实实例。
 set -uo pipefail
@@ -134,6 +134,32 @@ if [ $? -eq 0 ] && grep -q "下载源 gitee" "$WORK/run5.log"; then
 else
   bad "CLIPNEST_FROM 没生效：$(head -2 "$WORK/run5.log" | tr '\n' ' ')"
 fi
+
+# ---------- 6) auto：首选源资产坏掉（哈希不符）时换另一个源 ----------
+BAD3="$WORK/gh3b"
+GOOD3="$WORK/gh3g"
+make_release "$BAD3" corrupt
+make_release "$GOOD3"
+kill "$SRV_PID" 2>/dev/null
+start_server "$BAD3" "$WORK/gh3b.port" || { echo "假服务器起不来"; exit 1; }
+PORT_BAD3="$(cat "$WORK/gh3b.port")"
+SRV_BAD3="$SRV_PID"
+start_server "$GOOD3" "$WORK/gh3g.port" || { echo "假服务器起不来"; exit 1; }
+PORT_GOOD3="$(cat "$WORK/gh3g.port")"
+
+# 探针：gitee 不通 → 选 github（包是坏的）→ 哈希不符 → 自当换回 gitee
+env CLIPNEST_NO_KILL=1 CLIPNEST_REPO="fake/repo" CLIPNEST_REPO_GITEE="fake/repo" \
+  CLIPNEST_BASE_GITHUB="http://127.0.0.1:$PORT_BAD3" CLIPNEST_BASE_GITEE="http://127.0.0.1:$PORT_GOOD3" \
+  CLIPNEST_API_GITHUB="http://127.0.0.1:$PORT_BAD3/fake/repo/api" \
+  CLIPNEST_API_GITEE="http://127.0.0.1:1" \
+  bash tools/install.sh --from auto --version v1.2.3 --dir "$WORK/apps6" --no-open >"$WORK/run6.log" 2>&1
+if [ $? -eq 0 ] && [ -x "$WORK/apps6/clipnest.app/Contents/MacOS/clipnest" ]; then
+  ok "auto 源：首选源哈希不符时换另一个源装上"
+else
+  bad "换源重试没用：$(tail -3 "$WORK/run6.log" | tr '\n' ' ')"
+fi
+grep -q "校验失败" "$WORK/run6.log" && ok "换源日志写明了失败原因" || bad "换源日志没说原因"
+kill "$SRV_BAD3" 2>/dev/null
 
 echo "--------"
 echo "通过 $PASS 项，失败 $FAIL 项"

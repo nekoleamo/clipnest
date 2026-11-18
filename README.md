@@ -17,6 +17,9 @@ macOS / Windows 剪贴板历史管理器。菜单栏（托盘）常驻，`⌘⇧
 
 ## 安装
 
+> 国内网络直接用下面的 Gitee 镜像（国内快得多；脚本的 `auto` 选源也是先 Gitee）。GitHub 的发行版资产域在国内常常
+> 「API 能探到、真下载断」，那是卡十几秒后失败的主要原因。
+
 | 平台 | 方式 | 命令 |
 | --- | --- | --- |
 | macOS | Homebrew | `brew tap nekoleamo/clipnest && brew trust --tap nekoleamo/clipnest && brew install --cask clipnest` |
@@ -24,7 +27,7 @@ macOS / Windows 剪贴板历史管理器。菜单栏（托盘）常驻，`⌘⇧
 | Windows | Scoop | `scoop bucket add clipnest https://github.com/nekoleamo/scoop-clipnest && scoop install clipnest` |
 | Windows | 一键脚本 | `irm https://github.com/nekoleamo/clipnest/releases/latest/download/install.ps1 \| iex` |
 
-国内网络用 Gitee 镜像（脚本会自动挑能连通的下载源）：
+Gitee 镜像（国内推荐）：
 
 ```bash
 brew tap null_593_5354/clipnest https://gitee.com/null_593_5354/homebrew-clipnest

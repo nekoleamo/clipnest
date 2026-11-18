@@ -5,7 +5,7 @@
 #   irm https://gitee.com/<owner>/<repo>/raw/main/tools/install.ps1 | iex        # 国内
 #
 # 管道执行时没法传参数，用环境变量控制：
-#   $env:CLIPNEST_FROM    = "gitee"            # github | gitee | auto（默认 auto：先 GitHub，连不上换 Gitee）
+#   $env:CLIPNEST_FROM    = "github"           # github | gitee | auto（默认 auto：先 Gitee，连不上换 GitHub）
 #   $env:CLIPNEST_VERSION = "v1.2.3"           # 装指定版本，默认最新
 #   $env:CLIPNEST_DIR     = "D:\Apps\clipnest" # 装到哪，默认 %LOCALAPPDATA%\Programs\clipnest
 #   $env:CLIPNEST_REPO    = "owner/repo"       # 仓库（发布脚本没填占位符时才需要）
@@ -65,7 +65,9 @@ function ResolveHost {
         if (-not (HaveRepo $From)) { Die "仓库没配置：先设 `$env:CLIPNEST_REPO = 'owner/repo'" }
         return $From
     }
-    foreach ($h in @('github', 'gitee')) {
+    # 先 Gitee：国内网络下 GitHub 的资产域（release-assets.githubusercontent.com）常是
+    # 「API 探针通、真下载断」，探针选不出这种半通状态。海外用户可 $env:CLIPNEST_FROM='github'。
+    foreach ($h in @('gitee', 'github')) {
         if (-not (HaveRepo $h)) { continue }
         if (Reachable $h) { return $h }
         Say "· $h 连不上，换下一个"

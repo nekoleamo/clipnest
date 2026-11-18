@@ -6,7 +6,7 @@
 #   curl -fsSL https://gitee.com/<owner>/<repo>/raw/main/tools/install.sh | sh     # 国内
 #
 # 可选参数（管道执行时用环境变量传）：
-#   --from github|gitee|auto   下载源（默认 auto：先试 GitHub，3 秒不通就换 Gitee）
+#   --from github|gitee|auto   下载源（默认 auto：先 Gitee，不通再 GitHub；下载失败会自动换源重试）
 #   --version vX.Y.Z           装指定版本（默认取最新发行版）
 #   --dir DIR                  装到哪（默认 /Applications，不可写就用 ~/Applications）
 #   --no-open                  装完不自动启动
@@ -69,7 +69,8 @@ have_repo() {
   [ -n "$r" ] && [ "${r#__}" = "$r" ]
 }
 
-# 探一次 host：能不能拿到 JSON（3 秒超时），用来做 auto 选择
+# 探一次 host：能不能拿到 JSON（3 秒超时），用来做 auto 选择。
+# 注意它只探 API 域，不代表资产域可用（见下面的 SOURCES 回退）。
 reachable() {
   local api repo
   api="$(api_for "$1")"; repo="$(repo_for "$1")"
@@ -81,7 +82,9 @@ resolve_host() {
     github|gitee) have_repo "$FROM" || die "仓库没配置：用 CLIPNEST_REPO=owner/repo 指定"; printf '%s' "$FROM" ;;
     auto)
       local h
-      for h in github gitee; do
+      # 先 Gitee：国内网络下 GitHub 的资产域（release-assets.githubusercontent.com）常是
+      # 「API 探针通、真下载 SSL 断」，按探针选源会挑到它然后卡死在下载上。海外用户可 --from github。
+      for h in gitee github; do
         have_repo "$h" || continue
         if reachable "$h"; then printf '%s' "$h"; return 0; fi
         say "· $h 连不上，换下一个"
@@ -107,28 +110,54 @@ sha256_of() {
 }
 
 HOST="$(resolve_host)"
-REPO="$(repo_for "$HOST")"
 TAG="$(resolve_version "$HOST")"
 VER="${TAG#v}"
-say "== 下载源 ${HOST}（${REPO}），版本 $TAG"
-
 ZIP="clipnest-${VER}-macos.zip"
-DL="$(base_for "$HOST")/$REPO/releases/download/$TAG"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-say "· 取校验和"
-curl -fsSL --max-time 20 "$DL/SHA256SUMS" -o "$TMP/SHA256SUMS" || die "拿不到 SHA256SUMS（发行版里要一起传）"
-EXPECT="$(grep -F "$ZIP" "$TMP/SHA256SUMS" | awk '{print $1}' | head -1)"
-[ -n "$EXPECT" ] || die "SHA256SUMS 里没有 $ZIP"
+# 取校验和 + 下载 + 校验。非 0 表示这个源不行，原因留在 NOTE 里
+NOTE=""
+fetch_assets() {
+  local h="$1" repo dl expect got
+  repo="$(repo_for "$h")"
+  dl="$(base_for "$h")/$repo/releases/download/$TAG"
+  rm -f "$TMP/SHA256SUMS" "$TMP/$ZIP"
 
-say "· 下载 $ZIP"
-curl -fL --progress-bar --max-time 300 "$DL/$ZIP" -o "$TMP/$ZIP" || die "下载失败：$DL/$ZIP"
+  say "· 取校验和"
+  curl -fsSL --max-time 20 "$dl/SHA256SUMS" -o "$TMP/SHA256SUMS" 2>/dev/null \
+    || { NOTE="拿不到 SHA256SUMS（发行版里要一起传）"; return 1; }
+  expect="$(grep -F "$ZIP" "$TMP/SHA256SUMS" | awk '{print $1}' | head -1)"
+  [ -n "$expect" ] || { NOTE="SHA256SUMS 里没有 $ZIP"; return 1; }
 
-say "· 校验 SHA256"
-GOT="$(sha256_of "$TMP/$ZIP")"
-[ "$GOT" = "$EXPECT" ] || die "校验失败（期望 ${EXPECT}，实际 ${GOT}），已中止，什么都没装"
+  say "· 下载 $ZIP"
+  curl -fL --progress-bar --max-time 300 "$dl/$ZIP" -o "$TMP/$ZIP" 2>/dev/null \
+    || { NOTE="下载失败：$dl/$ZIP"; return 1; }
+
+  say "· 校验 SHA256"
+  got="$(sha256_of "$TMP/$ZIP")"
+  [ "$got" = "$expect" ] && return 0
+  NOTE="校验失败（期望 ${expect}，实际 ${got}）"
+  return 1
+}
+
+# auto 模式：首选源下载/校验失败就换另一个源再试一次（探针只看 API，管不了资产域）
+SOURCES=("$HOST")
+if [ "$FROM" = auto ]; then
+  for h in gitee github; do
+    [ "$h" = "$HOST" ] && continue
+    have_repo "$h" && SOURCES+=("$h")
+  done
+fi
+
+OK=0
+for h in "${SOURCES[@]}"; do
+  say "== 下载源 ${h}（$(repo_for "$h")），版本 $TAG"
+  if fetch_assets "$h"; then HOST="$h"; OK=1; break; fi
+  say "· ${h} 不行：${NOTE}"
+done
+[ "$OK" = 1 ] || die "${NOTE}，已中止，什么都没装"
 
 say "· 解包"
 ditto -x -k "$TMP/$ZIP" "$TMP/unpack" || die "解包失败"
