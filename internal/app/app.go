@@ -205,13 +205,21 @@ func (a *App) SetStatus(text string) {
 }
 
 // invalidate 请求重画（可以从任何 goroutine 调）。
+//
+// 设置窗也带上：同步结果、看门狗告警这些是后台写进来的，不重画的话
+// 用户只能靠动一下鼠标才看见「正在同步中」变成结果。
 func (a *App) invalidate() {
 	a.mu.Lock()
 	ready := a.ready
-	w := a.panel
+	wins := []*mygo.Window{a.panel, a.prefs, a.imageWin}
 	a.mu.Unlock()
-	if ready && w != nil {
-		w.Invalidate()
+	if !ready {
+		return
+	}
+	for _, w := range wins {
+		if w != nil {
+			w.Invalidate()
+		}
 	}
 }
 

@@ -63,7 +63,7 @@ irm https://gitee.com/null_593_5354/clipnest/raw/main/install.ps1 | iex
 
 ```bash
 go build ./...                   # 编译
-go test ./...                    # 测试（185 项）
+go test ./...                    # 测试（186 项）
 go vet ./...
 GOOS=windows go build ./...      # Windows 交叉编译
 go tool mygo build               # 打包 .app 与 dmg
@@ -96,7 +96,7 @@ docs/                路线图、执行计划、发布流程
 | `docs/路线图.md` | 产品定位、技术决策、阶段状态、**12 条行为契约** |
 | `docs/执行计划-下一步.md` | 当前状态与待做事项 |
 | `docs/发布.md` | 打包、发版、双源分发、Homebrew / Scoop |
-| `docs/变更记录.md` | 版本变更摘要（当前 1.3.1） |
+| `docs/变更记录.md` | 版本变更摘要（当前 1.3.2） |
 | `docs/windows-能力对照.md` | 逐项对照 macOS 能力在 Windows 的等价实现与验证状态 |
 | `AGENTS.md` | 协作约定与框架坑位（开发前必读） |
 | `docs/nsh-时代的历史坑.md` | nsh 0.5.1 与 Rust 时代的实测坑（历史参考） |

@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -448,8 +449,8 @@ func (a *App) prefsView(c *ui.Context) {
 				a.SavePrefs()
 			}
 			if ui.Button(c, "立即同步").Clicked() {
+				f.status = "" // 之前那行（可能是报错）先清掉：同步状态走下面那条线
 				a.StartSync()
-				f.status = "同步已发起"
 			}
 			if ui.Button(c, "关闭").Clicked() {
 				a.HidePrefs()
@@ -457,7 +458,7 @@ func (a *App) prefsView(c *ui.Context) {
 		})
 
 		if syncMsg := a.SyncStatus(); syncMsg != "" {
-			ui.Text(c, syncMsg).FontSize(11).TextColor(th.TextMuted)
+			ui.Text(c, syncMsg).FontSize(11).TextColor(syncStatusColor(syncMsg, th))
 		}
 		if f.status != "" {
 			ui.Text(c, f.status).FontSize(11).TextColor(th.Text)
@@ -467,6 +468,19 @@ func (a *App) prefsView(c *ui.Context) {
 	// 本窗口也排了延后动作（切更新源、检查更新…）：必须在自己的帧末跑掉。
 	// a.runPending 只在面板视图里跑的话，这里排的活永远等不到执行。
 	a.runPending()
+}
+
+// syncStatusColor 按状态首字上色：失败红、告警黄、成功绿、进行中灰。
+func syncStatusColor(msg string, th *ui.Theme) ui.Color {
+	switch {
+	case strings.HasPrefix(msg, "❌"):
+		return th.Danger
+	case strings.HasPrefix(msg, "⚠️"):
+		return th.Warning
+	case strings.HasPrefix(msg, "✅"):
+		return th.Success
+	}
+	return th.TextMuted
 }
 
 func label(c *ui.Context, text string, th *ui.Theme) {

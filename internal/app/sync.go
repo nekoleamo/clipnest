@@ -9,9 +9,19 @@ import (
 	clipsync "clipnest/internal/sync"
 )
 
+// syncRunningMsg 是同步进行中显示的那句话。
+const syncRunningMsg = "🔄 正在同步中…"
+
+// syncOnce 可注入（测试里用假实现，不然会真去连 NAS）。
+var syncOnce = clipsync.RunOnce
+
 // StartSync 在后台跑一轮同步（UI 不卡）。
+//
+// 状态是**同步**改的：先把上一轮的 ✅/❌/⚠️ 换成「正在同步中」，再起 worker。
+// 不这么做的话，点完「立即同步」界面上还挂着上一次的报错，看着像又失败了。
 func (a *App) StartSync() {
 	clipsync.ResetEndpointCache() // 手动同步：重新探一次局域网/Tailscale
+	a.setSyncStatus(syncRunningMsg)
 	go a.runSync(true)
 }
 
@@ -97,9 +107,9 @@ func (a *App) runSync(loud bool) {
 		return
 	}
 	if loud {
-		a.setSyncStatus("同步中…")
+		a.setSyncStatus(syncRunningMsg)
 	}
-	report, err := clipsync.RunOnce(a.Store.DB, cfg, a.Paths)
+	report, err := syncOnce(a.Store.DB, cfg, a.Paths)
 	if err != nil {
 		logf("SYNC ERROR %v", err)
 		a.setSyncStatus("❌ " + err.Error())

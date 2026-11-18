@@ -1,14 +1,17 @@
 package app
 
 import (
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
 	"clipnest/internal/backup"
+	"clipnest/internal/paths"
 	"clipnest/internal/settings"
 	"clipnest/internal/sync"
 	"clipnest/internal/update"
@@ -563,4 +566,67 @@ func stubSecrets(t *testing.T, passphrase string) *[]string {
 	}
 	t.Cleanup(func() { secretGet, secretSet = oldGet, oldSet })
 	return &writes
+}
+
+// TestPrefsSyncStatusRunningThenResult 点「立即同步」要立刻清掉上一轮的报错、
+// 显示「正在同步中」，出结果后再换成最终结果。
+func TestPrefsSyncStatusRunningThenResult(t *testing.T) {
+	a := newTestApp(t)
+	// 配置成「能跑的样子」，否则 runSync 会在 Ready() 就返回 ⚠️ 同步未启用
+	cfg := sync.LoadConfig(a.Paths)
+	cfg.Enabled = true
+	cfg.Backend = sync.Backend{Kind: sync.BackendWebDav, URL: "https://nas.local:5006", Username: "u"}
+	if err := sync.SaveConfig(cfg, a.Paths); err != nil {
+		t.Fatal(err)
+	}
+
+	// 假同步：卡在 release 上，方便观察「进行中」这一档
+	release := make(chan struct{})
+	oldOnce := syncOnce
+	syncOnce = func(*sql.DB, sync.Config, paths.Paths) (sync.SyncReport, error) {
+		<-release
+		return sync.SyncReport{Pushed: 1, Endpoint: "局域网"}, nil
+	}
+	t.Cleanup(func() { syncOnce = oldOnce })
+
+	a.setSyncStatus("❌ PROPFIND: 401 Unauthorized") // 上一轮留下的报错
+	tt := ui.NewTester(a.PrefsView, 620, 720)
+	tt.Frame()
+	if !hasText(tt, "❌ PROPFIND: 401 Unauthorized") {
+		t.Fatal("前置：应当先显示上一轮的报错")
+	}
+
+	if err := tt.Click("立即同步"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if hasText(tt, "❌ PROPFIND: 401 Unauthorized") {
+		t.Fatal("点完「立即同步」不该还挂着上一轮的报错")
+	}
+	if !hasText(tt, syncRunningMsg) {
+		t.Fatalf("同步过程中应当显示 %q", syncRunningMsg)
+	}
+
+	close(release)
+	deadline := time.Now().Add(3 * time.Second)
+	for a.syncBusy.Load() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	tt.Frame()
+	if hasText(tt, syncRunningMsg) {
+		t.Fatal("出了结果就不该还显示「正在同步中」")
+	}
+	if !hasText(tt, "✅ 局域网") {
+		t.Fatal("应当换上成功结果")
+	}
+}
+
+// hasText 看某个文案在不在当前这一帧的界面上。
+func hasText(tt *ui.Tester, sub string) bool {
+	for _, n := range tt.AccessAll() {
+		if strings.Contains(n.Name, sub) || strings.Contains(n.Value, sub) {
+			return true
+		}
+	}
+	return false
 }
