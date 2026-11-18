@@ -316,6 +316,15 @@ func (a *App) prefsView(c *ui.Context) {
 				ui.Checkbox(c, &f.realtime, "实时同步（复制后立即推，并按下面间隔拉取）")
 				label(c, "实时拉取间隔（秒，2–300）", th)
 				ui.NumberInput(c, &f.pullSecs, 2, 300, 1)
+				// 水位只会往前走：对端漏了某一包（旧版覆盖写、包过期、换过库）就补不回来，
+				// 所以要有一个「重新推一遍」的入口
+				label(c, "对端缺历史时（换过库 / 旧版本覆盖写过 / 包过期）用这个补齐", th)
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+					if ui.Button(c, "重新推送全部历史…").Clicked() {
+						f.status = a.RepushAllHistory()
+					}
+					ui.Text(c, fmt.Sprintf("本机 %d 条", a.Total())).FontSize(11).TextColor(th.TextMuted)
+				})
 
 				ui.Divider(c)
 				ui.Text(c, "分组").FontSize(14).Bold().TextColor(th.Text)

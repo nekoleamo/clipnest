@@ -630,3 +630,51 @@ func hasText(tt *ui.Tester, sub string) bool {
 	}
 	return false
 }
+
+// TestRepushAllHistoryExportsEverythingAgain 「重新推送全部历史」要清掉导出水位，
+// 让下一轮把整段历史重新推一遍（对端漏了某一包时唯一的补救入口）。
+func TestRepushAllHistoryExportsEverythingAgain(t *testing.T) {
+	a := newTestApp(t)
+	record(t, a, "第一条历史")
+	record(t, a, "第二条历史")
+
+	// 假装已经推过：把水位放到未来，此时增量应当是 0 条
+	future := "2999-01-01T00:00:00.000Z"
+	if _, err := a.Store.DB.Exec(`INSERT INTO meta(key, value) VALUES ('sync_last_export', ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, future); err != nil {
+		t.Fatal(err)
+	}
+	changes, err := sync.ExportChanges(a.Store.DB, mustWatermark(t, a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 0 {
+		t.Fatalf("水位刚推完，增量应当是 0 条，实际 %d", len(changes))
+	}
+
+	// 点「重新推送全部历史」→ 水位被清掉
+	if msg := a.RepushAllHistory(); !strings.Contains(msg, "重新推送") {
+		t.Fatalf("提示不对：%q", msg)
+	}
+	changes, err = sync.ExportChanges(a.Store.DB, mustWatermark(t, a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 2 {
+		t.Fatalf("重推应当导出全部 2 条，实际 %d", len(changes))
+	}
+}
+
+// mustWatermark 读当前的导出水位（没有就是 nil，表示全量）。
+func mustWatermark(t *testing.T, a *App) *string {
+	t.Helper()
+	var at string
+	err := a.Store.DB.QueryRow("SELECT value FROM meta WHERE key = 'sync_last_export'").Scan(&at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &at
+}

@@ -41,7 +41,7 @@ docs/            路线图、执行计划、验证记录
 
 1. `docs/路线图.md` 第四节的 **12 条行为契约**在 Go 侧必须逐条成立，改一条要重开评估
 2. `internal/db` 的迁移脚本**只追加**，已发布脚本不可改。步骤现在是 `func(*sql.Tx) error`：纯 SQL 用 `sqlMigration(...)`，**加列类迁移必须先 `hasColumn` 再 ALTER**（SQLite 没有 `ADD COLUMN IF NOT EXISTS`，重跑会炸——`TestMigrateAdvancesVersionAndKeepsData` 会退化重跑一遍迁移）
-2b. **元数据与同步**：契约 6 规定置顶/收藏/敏感/备注/分组**不刷新 `updated_at`**，所以增量同步另看 `items.meta_at`（迁移 v3）。新增任何「改了但不该动排序」的字段，要同时写 `meta_at`，否则那项改动永远出不了本机。**`meta_at` 还必须严格大于本条原来的 `updated_at`/`meta_at`**（`db.nextMetaAt`）：时间戳只到毫秒，同一毫秒里插入再改元数据会打平，对端 merge 认作「不比本地新」→ 改动静默丢失
+2b. **元数据与同步**：契约 6 规定置顶/收藏/敏感/备注/分组**不刷新 `updated_at`**，所以增量同步另看 `items.meta_at`（迁移 v3）。新增任何「改了但不该动排序」的字段，要同时写 `meta_at`，否则那项改动永远出不了本机。**`meta_at` 还必须严格大于本条原来的 `updated_at`/`meta_at`**（`db.nextMetaAt`）：时间戳只到毫秒，同一毫秒里插入再改元数据会打平，对端 merge 认作「不比本地新」→ 改动静默丢失。图片原图推送前先查 `synced_blobs`（迁移 v4）：图片条目改备注/置顶会重新进增量，不查台账就会每次重传整张原图
 3. `content_hash = blake3("<kind>:<content>")`；去重命中只 `use_count + 1` 并刷新 `updated_at`
 4. 搜索：长词走 FTS5，**trigram 查询词 <3 字符必须降级 `LIKE`**（2 个汉字命中不了）
 5. 自身写回必须被 guard 抑制，不产生新记录

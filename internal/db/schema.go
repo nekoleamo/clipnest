@@ -24,6 +24,7 @@ var migrations = []func(*sql.Tx) error{
 	sqlMigration(v1),
 	sqlMigration(v2),
 	migrateV3,
+	sqlMigration(v4),
 }
 
 // sqlMigration 把一段 SQL 变成一个迁移步骤。
@@ -131,6 +132,17 @@ func migrateV3(tx *sql.Tx) error {
 	}
 	return nil
 }
+
+// v4：记「这张图片的原图已经在远端了」，免得每次图片条目被改动就整张重传。
+//
+// 全量重推整段历史（设置窗的「重新推送全部历史」）时，图片是最贵的那部分：
+// 有了这张表，重推只走条目元数据，图片不会重上几百兆。
+const v4 = `
+CREATE TABLE IF NOT EXISTS synced_blobs (
+  hash       TEXT PRIMARY KEY,
+  synced_at  TEXT NOT NULL
+);
+`
 
 // hasColumn 查表里有没有这一列。
 func hasColumn(tx *sql.Tx, table, column string) (bool, error) {

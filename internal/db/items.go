@@ -331,3 +331,23 @@ func nextMetaAt(db *sql.DB, id int64) string {
 	}
 	return now
 }
+
+// BlobSynced 报告这张图片的原图是否已经推到过远端。
+func BlobSynced(db *sql.DB, hash string) (bool, error) {
+	var one int
+	err := db.QueryRow("SELECT 1 FROM synced_blobs WHERE hash = ?", hash).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// MarkBlobSynced 记下「这张图片的原图在远端已经有了」。
+func MarkBlobSynced(db *sql.DB, hash string) error {
+	_, err := db.Exec(`INSERT INTO synced_blobs(hash, synced_at) VALUES (?, ?)
+		ON CONFLICT(hash) DO UPDATE SET synced_at = excluded.synced_at`, hash, model.Now())
+	return err
+}

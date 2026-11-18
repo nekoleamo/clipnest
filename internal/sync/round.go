@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"clipnest/internal/backup"
+	clipdb "clipnest/internal/db"
 	"clipnest/internal/model"
 	"clipnest/internal/paths"
 )
@@ -135,6 +136,7 @@ func syncRound(db *sql.DB, transport Transport, deviceID string, p paths.Paths, 
 	if err != nil {
 		return report, err
 	}
+	logRemoteOnce(names)
 
 	// 1) 推：只发上次导出之后的变更，一包一个文件（<设备名>-<时刻>.json），互不覆盖
 	since, err := lastExport(db)
@@ -165,7 +167,7 @@ func syncRound(db *sql.DB, transport Transport, deviceID string, p paths.Paths, 
 			return report, err
 		}
 		report.Pushed = len(pkg.Changes)
-		report.BlobsPushed = pushBlobs(transport, p, pkg.Changes)
+		report.BlobsPushed = pushBlobs(transport, db, p, pkg.Changes)
 	}
 	// 没有变更也要记时间点，否则下次会把老变更再发一遍。
 	if err := setLastExport(db, exportedAt); err != nil {
@@ -211,7 +213,7 @@ func syncRound(db *sql.DB, transport Transport, deviceID string, p paths.Paths, 
 			return report, err
 		}
 		report.Applied.merge(applied)
-		report.BlobsPulled += pullBlobs(transport, p, pkg.Changes)
+		report.BlobsPulled += pullBlobs(transport, db, p, pkg.Changes)
 		// 吃起来哪一包就记到哪：下一轮不再重复下载（合并是幂等的，重复也没事，只是费流量）
 		at := stampOf(pkg.ExportedAt)
 		if stamped {
@@ -247,6 +249,20 @@ func logSkipOnce(name, reason string) {
 	Logf("SYNC skip %s: %s", name, reason)
 }
 
+// lastRemoteLog 记上次记下来的远端清单，用来「变了才记一行」。
+var lastRemoteLog string
+
+// logRemoteOnce 远端包清单变了就记一行 —— 排查「两台没同步」时，
+// 一张文件清单就能看出对端到底有没有在写、写的是新格式还是旧格式。
+func logRemoteOnce(names []string) {
+	key := strings.Join(names, ",")
+	if key == lastRemoteLog {
+		return
+	}
+	lastRemoteLog = key
+	Logf("SYNC remote %d 个包：%s", len(names), key)
+}
+
 // cleanupOwnPackages 删掉本机超过保留期的增量包。
 //
 // 只删自己的：别人的包什么时候能删，由那台机器自己判断（它才知道对端拉没拉过）。
@@ -261,6 +277,15 @@ func cleanupOwnPackages(transport Transport, device string, names []string) {
 			Logf("SYNC 清理旧包 %s 失败：%v", name, err)
 		}
 	}
+}
+
+// ResetExportWatermark 清掉「本地已导出到哪」，下一轮就重新导全量（条目 + 墓碑）。
+//
+// 用途：对端在某一包上漏了（旧版本覆盖写、包过期被删、本机换过库），水位只会往前走，
+// 不重置就永远补不回来。重推是幂等的：对端按时间戳判新旧，重复合并不会改坏数据。
+func ResetExportWatermark(db *sql.DB) error {
+	_, err := db.Exec("DELETE FROM meta WHERE key = 'sync_last_export'")
+	return err
 }
 
 // lastExport 读上次导出的时间点。
@@ -292,13 +317,18 @@ func BlobPath(hash string) string {
 }
 
 // pushBlobs 把包里的图片原图传到远端。
-func pushBlobs(transport Transport, p paths.Paths, changes []Change) int {
+func pushBlobs(transport Transport, db *sql.DB, p paths.Paths, changes []Change) int {
 	sent := 0
 	for _, change := range changes {
 		if change.Op != "upsert" || change.Item == nil || change.Item.Kind != string(model.KindImage) {
 			continue
 		}
 		hash := strings.TrimSuffix(change.Item.Content, ".png")
+		// 已经在远端的就别再传一遍：图片条目每改一次备注/置顶都会进增量，
+		// 每次都整张重传的话（全量重推时更是几百兆）纯属浪费
+		if done, err := clipdb.BlobSynced(db, hash); err == nil && done {
+			continue
+		}
 		data, err := os.ReadFile(p.ImageOrigin(hash))
 		if err != nil {
 			Logf("SYNC blob missing local: %s", hash)
@@ -308,13 +338,16 @@ func pushBlobs(transport Transport, p paths.Paths, changes []Change) int {
 			Logf("SYNC blob push failed %s: %v", hash, err)
 			continue
 		}
+		if err := clipdb.MarkBlobSynced(db, hash); err != nil {
+			Logf("SYNC blob mark failed %s: %v", hash, err)
+		}
 		sent++
 	}
 	return sent
 }
 
 // pullBlobs 拉取包里本地还缺的图片原图（并顺手生成缩略图）。
-func pullBlobs(transport Transport, p paths.Paths, changes []Change) int {
+func pullBlobs(transport Transport, db *sql.DB, p paths.Paths, changes []Change) int {
 	got := 0
 	for _, change := range changes {
 		if change.Op != "upsert" || change.Item == nil || change.Item.Kind != string(model.KindImage) {
@@ -341,6 +374,10 @@ func pullBlobs(transport Transport, p paths.Paths, changes []Change) int {
 		}
 		// 缩略图失败不影响同步（面板退化成显示尺寸）
 		_ = writeThumbnail(data, thumbPath)
+		// 我们也算「远端已有」：以后本机重推历史时不用把它的原图再传一次
+		if err := clipdb.MarkBlobSynced(db, hash); err != nil {
+			Logf("SYNC blob mark failed %s: %v", hash, err)
+		}
 		got++
 	}
 	return got

@@ -12,6 +12,21 @@ import (
 // syncRunningMsg 是同步进行中显示的那句话。
 const syncRunningMsg = "🔄 正在同步中…"
 
+// RepushAllHistory 把本机整段历史重新推一遍（清掉「已导出到哪」的水位）。
+//
+// 什么时候需要：对端在某一包上漏了 —— 旧版本把增量覆盖写、包过了保留期被删、
+// 本机换过库、或者对端刚装好而本机早就在同步（水位早就走过那些条目的时间戳）。
+// 重推是幂等的，对端按时间戳判新旧；图片走 synced_blobs 台账，不会重新上传原图。
+func (a *App) RepushAllHistory() string {
+	if err := clipsync.ResetExportWatermark(a.Store.DB); err != nil {
+		logf("SYNC repush reset failed: %v", err)
+		return "❌ 重置推送水位失败：" + err.Error()
+	}
+	logf("SYNC repush：已清掉导出水位，下一轮推全量")
+	a.StartSync()
+	return "已安排重新推送全部历史（同步中…）"
+}
+
 // syncOnce 可注入（测试里用假实现，不然会真去连 NAS）。
 var syncOnce = clipsync.RunOnce
 

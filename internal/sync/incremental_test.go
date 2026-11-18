@@ -15,6 +15,12 @@ import (
 type countingTransport struct {
 	*LocalTransport
 	gets int
+	puts int
+}
+
+func (c *countingTransport) Put(name string, data []byte) error {
+	c.puts++
+	return c.LocalTransport.Put(name, data)
 }
 
 func (c *countingTransport) Get(name string) ([]byte, error) {
@@ -170,4 +176,49 @@ func countItems(t *testing.T, database *sqlDB) int {
 		t.Fatal(err)
 	}
 	return n
+}
+
+// TestBlobPushIsIdempotent 图片原图只推一次：条目再改（备注/置顶）也不整张重传，
+// 否则「重新推送全部历史」= 把几百兆图片重上一遍。
+func TestBlobPushIsIdempotent(t *testing.T) {
+	remote := t.TempDir()
+	a := openDB(t)
+	pa := tempPaths(t, "a")
+	tA := &countingTransport{LocalTransport: NewLocalTransport(remote)}
+
+	hash := "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+	origin, _, err := pa.EnsureImageDirs(hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(origin, []byte("png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := db.Upsert(a, model.NewItem{Kind: model.KindImage, Content: hash + ".png", Width: 8, Height: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := syncRound(a, tA, "mac-a", pa, backup.Plain, backup.Plain); err != nil {
+		t.Fatal(err)
+	}
+	if tA.puts == 0 {
+		t.Fatal("第一次应当把原图传上去")
+	}
+
+	// 改个备注让这条图片重新进增量，再推一轮
+	note := "改个备注"
+	if err := db.UpdateMeta(a, res.ID, db.MetaPatch{Note: &note}); err != nil {
+		t.Fatal(err)
+	}
+	tA.puts = 0
+	report, err := syncRound(a, tA, "mac-a", pa, backup.Plain, backup.Plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Pushed != 1 {
+		t.Fatalf("条目应当重新进增量，实际推了 %d", report.Pushed)
+	}
+	if report.BlobsPushed != 0 || tA.puts != 1 {
+		t.Fatalf("原图已经在远端，不该重传：BlobsPushed=%d puts=%d", report.BlobsPushed, tA.puts)
+	}
 }
