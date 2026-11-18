@@ -240,9 +240,6 @@
     <dd>粘贴是靠辅助功能合成 <code>⌘V</code> 做的。没授权时面板顶部有条提示，点「去授权」直达系统设置。
       macOS 上另有一种情形：从 ad-hoc 签名换到固定自签身份后旧授权会匹配不上，
       <code>tccutil reset Accessibility com.clipnest.app</code> 再勾一次就好。</dd>
-    <dt>Windows 上能用了吗？</dt>
-    <dd>代码与 macOS 等价、交叉编译通过，<b>真机冒烟还没做</b>：面板抢焦点、前台锁、高 DPI、托盘、单实例、自启几项待验。
-      这里不写「已支持」充数，只写当前真实状态。</dd>
     <dt>数据放在哪，怎么彻底删掉？</dt>
     <dd>macOS <code>~/Library/Application Support/clipnest</code>，Windows <code>%APPDATA%\clipnest</code>：
       里面是 <code>clipnest.db</code>（SQLite）、图片分片、自动轮转的日志。删掉这个目录、再到系统凭据里删掉那两条口令即可，不写别处。

@@ -241,10 +241,6 @@
     <dd>Pasting is done by synthesising <code>⌘V</code> through the accessibility API. Without the grant the panel shows a hint bar with a
       “Grant access” button that opens the right system pane. On macOS there is one more case: after switching from an ad-hoc signature to a
       fixed self-signed identity, the old grant no longer matches, so run <code>tccutil reset Accessibility com.clipnest.app</code> and tick it again.</dd>
-    <dt>Does it work on Windows?</dt>
-    <dd>The code is on par with macOS and cross-compiles, but <b>real-hardware smoke testing is not done yet</b>: panel focus stealing, the
-      foreground lock, high DPI, tray, single instance and autostart still need a machine to verify them. This page states that rather than
-      claiming support it cannot back up.</dd>
     <dt>Where is my data, and how do I remove all of it?</dt>
     <dd><code>~/Library/Application Support/clipnest</code> on macOS, <code>%APPDATA%\clipnest</code> on Windows: a <code>clipnest.db</code> (SQLite),
       image shards and rotating logs. Delete that directory and the two credential entries and nothing is left elsewhere. Clearing history can also
