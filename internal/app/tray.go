@@ -13,8 +13,10 @@ func (a *App) AttachTray(icon []byte) (*mygo.Tray, error) {
 		ID:             "clipnest",
 		Icon:           icon,
 		IconIsTemplate: true,
-		Title:          "❐",
-		Menu:           menu,
+		// Title 别填：macOS 会把它当**文字**画在图标旁边（实测菜单栏里就多出
+		// 一个像图标的 ❐），看起来就是「重复了一个图标」。只要图标就够。
+		ToolTip: "clipnest 剪贴板历史",
+		Menu:    menu,
 	})
 	if err != nil {
 		return nil, err

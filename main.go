@@ -66,7 +66,7 @@ func main() {
 			Height:      int(a.Settings.PanelHeight),
 			// 缩到比这更小就排不开了（列表 + 右栏预览 + 底栏）
 			MinWidth:  settings.PanelWidth,
-			MinHeight: 300,
+			MinHeight: settings.PanelHeightMin,
 			Content:   ui.View(a.PanelView),
 		})
 		// 关闭（Esc / ⌘W）当隐藏，下次唤起不用重建

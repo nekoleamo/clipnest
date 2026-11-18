@@ -183,6 +183,9 @@ func (a *App) DetailView(c *ui.Context) {
 		hint := fmtSize(row)
 		ui.Text(c, hint+" · 点任意处或 Esc 关闭").FontSize(11).TextColor(th.TextMuted)
 	})
+	// 本窗口也排了延后动作（点任意处关窗）：必须在自己的帧末跑掉。
+	// a.runPending 只在面板视图里跑的话，只开着预览窗时点了没反应。
+	a.runPending()
 }
 
 // fmtSize 是「宽 × 高」文案。

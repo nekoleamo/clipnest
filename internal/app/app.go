@@ -123,9 +123,8 @@ type App struct {
 	syncMsg string
 
 	// —— 设置窗的跨帧草稿 ——
-	shortcutDraft string
+	form          prefsForm // 设置窗整张表的编辑草稿（见 prefs.go）
 	shortcutMsg   string
-	pruneDays     float64
 	clearConfirm  bool
 	// 分组管理的草稿（跨帧保留，否则一个字就丢）
 	newGroupDraft string
@@ -181,8 +180,9 @@ func New(p paths.Paths) (*App, error) {
 }
 
 // logf 是应用日志（写文件 + stderr）。
+//
+// 只转给一个出口：两个包各自都接了 log.Printf，两边都转的话同一行会写两遍（日志里满屏重复）。
 func logf(format string, args ...any) {
-	store.Logf(format, args...)
 	settings.Logf(format, args...)
 }
 

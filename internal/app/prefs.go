@@ -13,120 +13,201 @@ import (
 	"clipnest/internal/update"
 )
 
-// prefsView 是设置窗：改完点保存写回 settings.json / sync.json。
-func (a *App) prefsView(c *ui.Context) {
-	th := c.Theme()
+// prefsForm 是设置窗的编辑草稿。
+//
+// 视图是每帧重建的（immediate mode），控件必须绑在**跨帧保留**的地方：绑在
+// prefsView 的局部变量上，下一帧又被 settings.json 里的旧值重新赋值一遍，表现就是
+// 「+ 只跳一次、− 卡住不动」「复选框点了不回勾」「输入框打不进字」「选项卡选不中」。
+// 只有点「保存」才把草稿写回 settings.json / sync.json。
+type prefsForm struct {
+	loaded bool
+	// status 是本窗口的操作结果提示（保存/导出/导入），要跨帧留着才看得见
+	status string
+
+	// 面板
+	maxItems    float64
+	panelHeight float64
+	position    int // 0 = 屏幕居中, 1 = 贴屏幕底部
+	scroll      ui.ScrollState
+
+	// 快捷键与清理
+	shortcut  string
+	pruneDays float64
+
+	// 过滤与导出
+	ignoreSensitive bool
+	sensitiveApps   string
+	exportDir       string
+
+	// 同步
+	syncOn      bool
+	deviceName  string
+	backendKind int // 0 = 本地目录, 1 = WebDAV
+	syncDir     string
+	remoteURL   string
+	fallbackURL string
+	remoteUser  string
+	remoteDir   string
+	passphrase  string
+	insecure    bool
+	encrypt     bool
+	realtime    bool
+	interval    float64
+	pullSecs    float64
+}
+
+// loadPrefsFormLocked 用已保存的配置填一遍草稿（调用方持有 a.mu）。
+func (a *App) loadPrefsFormLocked() {
 	s := a.Settings
 	cfg := clipsync.LoadConfig(a.Paths)
 
-	maxItems := float64(s.MaxItems)
-	panelHeight := float64(s.PanelHeight)
-	position := 0
+	var f prefsForm
+	f.loaded = true
+	f.maxItems = float64(s.MaxItems)
+	f.panelHeight = float64(s.PanelHeight)
 	if s.PanelPosition == settings.PositionBottom {
-		position = 1
+		f.position = 1
 	}
-	ignoreSensitive := s.IgnoreSensitiveApps
-	sensitiveApps := joinLines(s.SensitiveApps)
-	exportDir := s.ExportDir
+	f.shortcut = s.Shortcut
+	f.pruneDays = 30
+	if a.form.pruneDays > 0 {
+		f.pruneDays = a.form.pruneDays // 天内清理的数不存盘，但本轮不重置
+	}
+	f.ignoreSensitive = s.IgnoreSensitiveApps
+	f.sensitiveApps = joinLines(s.SensitiveApps)
+	f.exportDir = s.ExportDir
 
-	syncOn := cfg.Enabled
-	backendKind := 0 // 0 = 本地目录, 1 = WebDAV
+	f.syncOn = cfg.Enabled
+	f.deviceName = cfg.DeviceName
 	if cfg.Backend.Kind == clipsync.BackendWebDav {
-		backendKind = 1
+		f.backendKind = 1
 	}
-	syncDir := cfg.Backend.Path
-	remoteURL := cfg.Backend.URL
-	fallbackURL := cfg.Backend.FallbackURL
-	remoteUser := cfg.Backend.Username
-	remoteDir := cfg.Backend.RemoteDir
-	deviceName := cfg.DeviceName
-	interval := float64(cfg.IntervalSecs)
-	insecure := cfg.Backend.InsecureTLS
-	encrypt := cfg.Encryption.Enabled
-	realtime := cfg.Realtime
-	shortcutDraft := *a.ShortcutDraft()
-	pruneDays := *a.PruneDaysDraft()
-	pullSecs := float64(cfg.PullIntervalSecs())
-	passphrase := ""
+	f.syncDir = cfg.Backend.Path
+	f.remoteURL = cfg.Backend.URL
+	f.fallbackURL = cfg.Backend.FallbackURL
+	f.remoteUser = cfg.Backend.Username
+	f.remoteDir = cfg.Backend.RemoteDir
+	f.interval = float64(cfg.IntervalSecs)
+	f.pullSecs = float64(cfg.PullIntervalSecs())
+	f.insecure = cfg.Backend.InsecureTLS
+	f.encrypt = cfg.Encryption.Enabled
+	f.realtime = cfg.Realtime
 
-	var status string
-	apply := func() {
-		next := s
-		next.MaxItems = int64(maxItems)
-		next.PanelHeight = int32(panelHeight)
-		if position == 1 {
-			next.PanelPosition = settings.PositionBottom
-		} else {
-			next.PanelPosition = settings.PositionCenter
-		}
-		next.SensitiveApps = splitLines(sensitiveApps)
-		next.IgnoreSensitiveApps = ignoreSensitive
-		next.ExportDir = exportDir
-		next = settings.Normalize(next)
-		if err := settings.Save(next, a.Paths); err != nil {
-			status = "❌ 设置保存失败：" + err.Error()
-			return
-		}
-		a.Settings = next
+	// 滚动位置不跟着重置，否则用户改到一半重开窗口又要翻回去
+	f.scroll = a.form.scroll
+	a.form = f
+}
 
-		nextCfg := cfg
-		nextCfg.Enabled = syncOn
-		nextCfg.DeviceName = deviceName
-		nextCfg.IntervalSecs = int64(interval)
-		nextCfg.Encryption.Enabled = encrypt
-		nextCfg.Realtime = realtime
-		nextCfg.PullSecs = int64(pullSecs)
-		if backendKind == 1 {
-			nextCfg.Backend = clipsync.Backend{
-				Kind: clipsync.BackendWebDav, URL: remoteURL, FallbackURL: fallbackURL,
-				Username: remoteUser, RemoteDir: remoteDir, InsecureTLS: insecure,
-			}
-		} else {
-			nextCfg.Backend = clipsync.Backend{Kind: clipsync.BackendLocalDir, Path: syncDir}
+// PrefsForm 返回设置窗的草稿（第一次用时从已保存的配置读一份）。
+func (a *App) PrefsForm() *prefsForm {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.form.loaded {
+		a.loadPrefsFormLocked()
+	}
+	return &a.form
+}
+
+// ResetPrefsForm 按已保存的配置重新填草稿：每次打开设置窗都重来一遍，
+// 不留上次没保存的编辑（和面板的 ResetPanelState 一个道理）。
+func (a *App) ResetPrefsForm() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.loadPrefsFormLocked()
+	a.form.status = ""
+	a.form.scroll.Y = 0
+}
+
+// SavePrefs 把设置窗的草稿写回 settings.json / sync.json（点「保存」时调用）。
+func (a *App) SavePrefs() {
+	f := a.PrefsForm()
+	f.status = "" // 先清上次的结果，否则保存成功后还掉着上一次的报错
+	next := a.Settings
+	next.MaxItems = int64(f.maxItems)
+	next.PanelHeight = int32(f.panelHeight)
+	next.PanelPosition = settings.PositionCenter
+	if f.position == 1 {
+		next.PanelPosition = settings.PositionBottom
+	}
+	next.SensitiveApps = splitLines(f.sensitiveApps)
+	next.IgnoreSensitiveApps = f.ignoreSensitive
+	next.ExportDir = f.exportDir
+	next = settings.Normalize(next)
+	if err := settings.Save(next, a.Paths); err != nil {
+		f.status = "❌ 设置保存失败：" + err.Error()
+		return
+	}
+	a.Settings = next
+	// 面板尺寸是窗口属性：改完立刻生效，不用重启（位置在每次唤出时按设置算）
+	if w := a.panelWindow(); w != nil {
+		width, _ := w.Size()
+		w.SetSize(width, int(next.PanelHeight))
+	}
+
+	nextCfg := clipsync.LoadConfig(a.Paths)
+	nextCfg.Enabled = f.syncOn
+	nextCfg.DeviceName = f.deviceName
+	nextCfg.IntervalSecs = int64(f.interval)
+	nextCfg.Encryption.Enabled = f.encrypt
+	nextCfg.Realtime = f.realtime
+	nextCfg.PullSecs = int64(f.pullSecs)
+	if f.backendKind == 1 {
+		nextCfg.Backend = clipsync.Backend{
+			Kind: clipsync.BackendWebDav, URL: f.remoteURL, FallbackURL: f.fallbackURL,
+			Username: f.remoteUser, RemoteDir: f.remoteDir, InsecureTLS: f.insecure,
 		}
-		nextCfg = nextCfg.Normalize()
-		if err := clipsync.SaveConfig(nextCfg, a.Paths); err != nil {
-			status = "❌ 同步配置保存失败：" + err.Error()
-			return
-		}
-		if encrypt && passphrase != "" {
-			if err := clipsync.SecretSet(clipsync.SecretService, nextCfg.DeviceName, passphrase); err != nil {
-				status = "⚠️ 口令没写进" + clipsync.SecretStoreName() + "：" + err.Error()
-			}
-		}
-		if backendKind == 1 && passphrase != "" {
-			// WebDAV 账号口令也存一份；存不进去要报出来，否则之后同步发请求时
-			// 只会得到一个「认证失败」，看不出是这一步没落盘
-			if err := clipsync.SecretSet(clipsync.WebDavSecretService, nextCfg.DeviceName, passphrase); err != nil {
-				logf("WEBDAV secret save failed: %v", err)
-				status = "⚠️ WebDAV 口令没写进" + clipsync.SecretStoreName() + "：" + err.Error()
-			}
-		}
-		a.Refresh()
-		if status == "" {
-			status = "✅ 已保存"
+	} else {
+		nextCfg.Backend = clipsync.Backend{Kind: clipsync.BackendLocalDir, Path: f.syncDir}
+	}
+	nextCfg = nextCfg.Normalize()
+	if err := clipsync.SaveConfig(nextCfg, a.Paths); err != nil {
+		f.status = "❌ 同步配置保存失败：" + err.Error()
+		return
+	}
+	if f.encrypt && f.passphrase != "" {
+		if err := clipsync.SecretSet(clipsync.SecretService, nextCfg.DeviceName, f.passphrase); err != nil {
+			f.status = "⚠️ 口令没写进" + clipsync.SecretStoreName() + "：" + err.Error()
 		}
 	}
+	if f.backendKind == 1 && f.passphrase != "" {
+		// WebDAV 账号口令也存一份；存不进去要报出来，否则之后同步发请求时
+		// 只会得到一个「认证失败」，看不出是这一步没落盘
+		if err := clipsync.SecretSet(clipsync.WebDavSecretService, nextCfg.DeviceName, f.passphrase); err != nil {
+			logf("WEBDAV secret save failed: %v", err)
+			f.status = "⚠️ WebDAV 口令没写进" + clipsync.SecretStoreName() + "：" + err.Error()
+		}
+	}
+	f.passphrase = ""
+	a.Refresh()
+	if f.status == "" {
+		f.status = "✅ 已保存"
+	}
+}
+
+// prefsView 是设置窗：改完点保存写回 settings.json / sync.json。
+func (a *App) prefsView(c *ui.Context) {
+	th := c.Theme()
+	f := a.PrefsForm()
 
 	ui.Column(c).Fill().Gap(10).Padding(16).Background(th.Background).Children(func() {
-		ui.Scroll(c).Fill().Children(func() {
+		ui.Scroll(c).Fill().TrackScroll(&f.scroll).KeepScrollbars(true).Children(func() {
 			ui.Column(c).Gap(10).Children(func() {
 				ui.Text(c, "clipnest 设置").FontSize(16).Bold().TextColor(th.Text)
 
 				label(c, "历史保留条数（0 = 不限）", th)
-				ui.NumberInput(c, &maxItems, 0, 1_000_000, 100)
+				ui.NumberInput(c, &f.maxItems, 0, 1_000_000, 100)
 
 				label(c, "面板高度（点）", th)
-				ui.NumberInput(c, &panelHeight, float64(settings.PanelHeightMin), float64(settings.PanelHeightMax), 20)
+				ui.NumberInput(c, &f.panelHeight, float64(settings.PanelHeightMin), float64(settings.PanelHeightMax), 20)
 
 				label(c, "面板位置", th)
-				ui.Segmented(c, &position, "屏幕居中", "贴屏幕底部")
+				ui.Segmented(c, &f.position, "屏幕居中", "贴屏幕底部")
 
 				label(c, "唤起快捷键（accelerator，如 CmdOrCtrl+Shift+V / Alt+Space；当前 "+a.Hotkey()+"）", th)
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					ui.TextInput(c, &shortcutDraft).Width(240)
+					ui.TextInput(c, &f.shortcut).Width(240)
 					if ui.Button(c, "应用快捷键").Clicked() {
-						a.ApplyShortcutDraft(shortcutDraft)
+						a.ApplyShortcutDraft(f.shortcut)
 					}
 					if ui.Button(c, "恢复默认").Clicked() {
 						a.ApplyShortcutDraft(settings.DefaultShortcut)
@@ -140,15 +221,15 @@ func (a *App) prefsView(c *ui.Context) {
 				ui.Text(c, "历史清理").FontSize(14).Bold().TextColor(th.Text)
 				label(c, "清掉多少天之前的条目（收藏与置顶受保护）", th)
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					ui.NumberInput(c, &pruneDays, 1, 3650, 1)
+					ui.NumberInput(c, &f.pruneDays, 1, 3650, 1)
 					if ui.Button(c, "按天数清理").Clicked() {
-						a.PruneOlderThanDays(int(pruneDays))
+						f.status = a.PruneOlderThanDays(int(f.pruneDays))
 					}
 				})
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					if a.ClearConfirming() {
 						if ui.Button(c, "再点一次确认清空全部").Clicked() {
-							a.ClearAllHistory()
+							f.status = a.ClearAllHistory()
 						}
 						if ui.Button(c, "取消").Clicked() {
 							a.CancelClearAll()
@@ -159,40 +240,43 @@ func (a *App) prefsView(c *ui.Context) {
 				})
 
 				label(c, "敏感应用白名单（每行一个 bundle id / 进程名；留空用内置表）", th)
-				ui.TextArea(c, &sensitiveApps).Height(90)
-				ui.Checkbox(c, &ignoreSensitive, "按应用过滤敏感内容（关掉则不拦）")
+				ui.TextArea(c, &f.sensitiveApps).Height(90)
+				ui.Checkbox(c, &f.ignoreSensitive, "按应用过滤敏感内容（关掉则不拦）")
 
 				label(c, "导出目录（留空 = ~/Downloads）", th)
-				ui.TextInput(c, &exportDir)
+				ui.TextInput(c, &f.exportDir)
 
 				ui.Divider(c)
 				ui.Text(c, "同步").FontSize(14).Bold().TextColor(th.Text)
-				ui.Checkbox(c, &syncOn, "启用同步")
+				ui.Checkbox(c, &f.syncOn, "启用同步")
 				label(c, "本机名称（远端文件名用）", th)
-				ui.TextInput(c, &deviceName)
+				ui.TextInput(c, &f.deviceName)
 				label(c, "同步方式", th)
-				ui.Segmented(c, &backendKind, "本地目录 / 网盘", "WebDAV")
-				if backendKind == 0 {
+				ui.Segmented(c, &f.backendKind, "本地目录 / 网盘", "WebDAV")
+				if f.backendKind == 0 {
 					label(c, "本地目录（网盘同步盘、移动硬盘都行）", th)
-					ui.TextInput(c, &syncDir)
+					ui.TextInput(c, &f.syncDir)
 				} else {
 					label(c, "WebDAV 地址（如 https://nas.local:5006/data/dav）", th)
-					ui.TextInput(c, &remoteURL)
+					ui.TextInput(c, &f.remoteURL)
 					label(c, "备用地址（Tailscale / 外网；局域网不通时自动切过去）", th)
-					ui.TextInput(c, &fallbackURL).Placeholder("https://nas.<tailnet>.ts.net:5006")
-					label(c, "用户名 / 口令（口令写进"+clipsync.SecretStoreName()+"）", th)
-					ui.TextInput(c, &remoteUser)
-					ui.TextInput(c, &passphrase).Placeholder("口令 / 同步口令（留空不改）")
+					ui.TextInput(c, &f.fallbackURL).Placeholder("https://nas.<tailnet>.ts.net:5006")
+					label(c, "用户名（WebDAV 账号）", th)
+					ui.TextInput(c, &f.remoteUser)
 					label(c, "远端目录", th)
-					ui.TextInput(c, &remoteDir)
-					ui.Checkbox(c, &insecure, "允许自签证书（NAS 常见，有风险）")
+					ui.TextInput(c, &f.remoteDir)
+					ui.Checkbox(c, &f.insecure, "允许自签证书（NAS 常见，有风险）")
 				}
-				ui.Checkbox(c, &encrypt, "端到端加密（用口令派生密钥）")
+				// 口令不分模式：WebDAV 拿它当账号口令，加密与备份拿它派生密钥。
+				// 以前它嵌在 WebDAV 分支里，选本地目录时既设不了加密口令，也导不了备份。
+				label(c, "口令（WebDAV 账号口令 / 加密与备份口令；写进"+clipsync.SecretStoreName()+"，留空不改）", th)
+				ui.TextInput(c, &f.passphrase).Placeholder("口令（留空不改）")
+				ui.Checkbox(c, &f.encrypt, "端到端加密（用口令派生密钥）")
 				label(c, "自动同步间隔（秒；<60 不自动跑）", th)
-				ui.NumberInput(c, &interval, 0, 86400, 300)
-				ui.Checkbox(c, &realtime, "实时同步（复制后立即推，并按下面间隔拉取）")
+				ui.NumberInput(c, &f.interval, 0, 86400, 300)
+				ui.Checkbox(c, &f.realtime, "实时同步（复制后立即推，并按下面间隔拉取）")
 				label(c, "实时拉取间隔（秒，2–300）", th)
-				ui.NumberInput(c, &pullSecs, 2, 300, 1)
+				ui.NumberInput(c, &f.pullSecs, 2, 300, 1)
 
 				ui.Divider(c)
 				ui.Text(c, "分组").FontSize(14).Bold().TextColor(th.Text)
@@ -229,23 +313,23 @@ func (a *App) prefsView(c *ui.Context) {
 				label(c, "导出整个历史成一个加密 .cnbak（口令同上）", th)
 				ui.Row(c).Gap(8).Children(func() {
 					if ui.Button(c, "导出备份").Clicked() {
-						if passphrase == "" {
-							status = "⚠️ 请先填口令再导出"
-						} else if path, err := backup.ExportTo(a.Store.DB, a.Paths, passphrase); err != nil {
-							status = "❌ 导出失败：" + err.Error()
+						if f.passphrase == "" {
+							f.status = "⚠️ 请先填口令再导出"
+						} else if path, err := backup.ExportTo(a.Store.DB, a.Paths, f.passphrase); err != nil {
+							f.status = "❌ 导出失败：" + err.Error()
 						} else {
-							status = "✅ 已导出 " + baseName(path)
+							f.status = "✅ 已导出 " + baseName(path)
 						}
 					}
 					if ui.Button(c, "导入备份…").Clicked() {
-						if passphrase == "" {
-							status = "⚠️ 请先填口令再导入"
+						if f.passphrase == "" {
+							f.status = "⚠️ 请先填口令再导入"
 						} else if path := a.pickBackupFile(); path == "" {
-							status = "已取消导入"
-						} else if report, err := backup.Import(a.Store.DB, path, passphrase); err != nil {
-							status = "❌ 导入失败：" + err.Error()
+							f.status = "已取消导入"
+						} else if report, err := backup.Import(a.Store.DB, path, f.passphrase); err != nil {
+							f.status = "❌ 导入失败：" + err.Error()
 						} else {
-							status = fmt.Sprintf("✅ 导入 %d 条（跳过 %d）来自 %s",
+							f.status = fmt.Sprintf("✅ 导入 %d 条（跳过 %d）来自 %s",
 								report.Inserted, report.Skipped, baseName(path))
 							a.Refresh()
 						}
@@ -257,16 +341,16 @@ func (a *App) prefsView(c *ui.Context) {
 				ui.Row(c).Gap(8).Children(func() {
 					if ui.Button(c, "设为登录时启动").Clicked() {
 						if err := mygo.App.SetOpenAtLogin(true); err != nil {
-							status = "❌ " + err.Error()
+							f.status = "❌ " + err.Error()
 						} else {
-							status = "✅ 已设为登录时启动"
+							f.status = "✅ 已设为登录时启动"
 						}
 					}
 					if ui.Button(c, "取消登录启动").Clicked() {
 						if err := mygo.App.SetOpenAtLogin(false); err != nil {
-							status = "❌ " + err.Error()
+							f.status = "❌ " + err.Error()
 						} else {
-							status = "✅ 已取消"
+							f.status = "✅ 已取消"
 						}
 					}
 				})
@@ -323,11 +407,11 @@ func (a *App) prefsView(c *ui.Context) {
 
 		ui.Row(c).Gap(8).Children(func() {
 			if ui.PrimaryButton(c, "保存").Clicked() {
-				apply()
+				a.SavePrefs()
 			}
 			if ui.Button(c, "立即同步").Clicked() {
 				a.StartSync()
-				status = "同步已发起"
+				f.status = "同步已发起"
 			}
 			if ui.Button(c, "关闭").Clicked() {
 				if a.prefs != nil {
@@ -339,11 +423,14 @@ func (a *App) prefsView(c *ui.Context) {
 		if syncMsg := a.SyncStatus(); syncMsg != "" {
 			ui.Text(c, syncMsg).FontSize(11).TextColor(th.TextMuted)
 		}
-		if status != "" {
-			ui.Text(c, status).FontSize(11).TextColor(th.Text)
+		if f.status != "" {
+			ui.Text(c, f.status).FontSize(11).TextColor(th.Text)
 		}
 		ui.Text(c, fmt.Sprintf("数据目录：%s", a.Paths.Root())).FontSize(10).TextColor(th.TextMuted)
 	})
+	// 本窗口也排了延后动作（切更新源、检查更新…）：必须在自己的帧末跑掉。
+	// a.runPending 只在面板视图里跑的话，这里排的活永远等不到执行。
+	a.runPending()
 }
 
 func label(c *ui.Context, text string, th *ui.Theme) {
@@ -355,6 +442,7 @@ func (a *App) OpenPrefs() {
 	if a.prefs == nil {
 		return
 	}
+	a.ResetPrefsForm()
 	a.prefs.Show()
 	a.prefs.Focus()
 }

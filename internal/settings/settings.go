@@ -15,8 +15,9 @@ import (
 )
 
 // 面板尺寸（点）。宽度固定：左边列表 + 右边图片预览。
+// 下限跟面板窗的 MinHeight 对齐（300）：设得比窗口下限还小，改完也不生效，白让用户白点几下。
 const (
-	PanelHeightMin = 240
+	PanelHeightMin = 300
 	PanelHeightMax = 1200
 	PanelWidth     = 720
 )
