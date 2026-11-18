@@ -159,7 +159,7 @@ try {
     Say "✅ 已装到 $InstallDir\clipnest.exe（版本 $tag）"
     Say ''
     Say '下一步：'
-    Say '  1) 启动 clipnest（托盘出现 ❐ 图标）'
+    Say '  1) 启动 clipnest（托盘出现剪贴板图标）'
     Say '  2) Ctrl+Shift+V 唤出面板；托盘菜单里有设置'
     Say '  3) 数据在 %APPDATA%\clipnest（卸载时不会自动删，需要的话手动清）'
     if ($env:CLIPNEST_NO_OPEN -ne '1') {

@@ -116,7 +116,7 @@ cat >"$OUT/clipnest.scoop.json" <<JSON
   ],
   "notes": [
     "数据在 %APPDATA% 下的 clipnest 目录；卸载不会删除，要清干净请手动删掉",
-    "首次启动托盘出现 ❐ 图标，Ctrl+Shift+V 唤出面板"
+    "首次启动托盘出现剪贴板图标，Ctrl+Shift+V 唤出面板"
   ],
   "checkver": {
     "github": "https://github.com/${OWNER}/${REPO}"

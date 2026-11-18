@@ -188,7 +188,7 @@ xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
 say "✅ 已装到 ${DEST}（版本 ${TAG}）"
 say ""
 say "下一步："
-say "  1) 打开 clipnest（菜单栏出现 ❐ 图标）"
+say "  1) 打开 clipnest（菜单栏出现剪贴板图标）"
 say "  2) 首次启动按提示授予「辅助功能」权限（自动粘贴要用）"
 say "  3) 面板里 ⌘⇧V 唤出；设置窗可配同步/开机启动"
 if [ "$OPEN_AFTER" = "1" ]; then
