@@ -24,3 +24,6 @@
 
 # 发布产物
 /dist/
+
+# 官网渲染产物（tools/build-site.sh 生成）
+/site/dist/

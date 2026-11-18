@@ -33,9 +33,13 @@ internal/sensitive 敏感应用判定（前台应用身份，purego）
 internal/sync    WebDAV 增量同步 + 端到端加密
 internal/backup  加密备份导入导出
 ui/              面板（mygo ui 自绘）、设置窗、托盘菜单
-tools/           验证脚本（Swift，非产品代码，nsh 时代留下的仍可用）
+tools/           验证脚本与发版/渲染脚本（Swift 与 sh，非产品代码）
+site/            官网纯静态页（index.html 中文默认 + en/，共用 style.css）
 docs/            路线图、执行计划、验证记录
 ```
+
+官网用 `sh tools/build-site.sh` 渲染到 `site/dist/`（不入库），版本号只从 `mygo.json` 注入；
+改安装方式 / 快捷键 / 同步口令名 / Windows 状态时，`README.md`、`docs/` 与 `site/` 三处一起改。
 
 ## 迁移铁律
 

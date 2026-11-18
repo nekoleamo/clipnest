@@ -5,6 +5,8 @@ macOS / Windows 剪贴板历史管理器。菜单栏（托盘）常驻，`⌘⇧
 
 纯 Go：UI 由 [mygo](https://github.com/egoist/mygo) v0.10.0 自绘，无 WebView、无 Node、无 cgo。
 
+官网：<https://nekoleamo.github.io/clipnest/>（源文件在 `site/`，`sh tools/build-site.sh` 渲染到 `site/dist/`）。
+
 ## 能做什么
 
 - **采集**：文本 / 富文本（HTML、RTF）/ 图片 / 文件；按内容哈希去重并统计使用次数
@@ -85,6 +87,7 @@ go vet ./...
 GOOS=windows go build ./...      # Windows 交叉编译
 go tool mygo build               # 打包 .app 与 dmg
 python3 tools/thirdparty.py      # 依赖变了就重生成第三方许可证清单
+sh tools/build-site.sh           # 渲染官网到 site/dist（版本号取自 mygo.json）
 ```
 
 提交前装钩子（跑 vet + test + Windows 交叉编译）：`git config core.hooksPath .githooks`。
@@ -102,7 +105,8 @@ internal/sensitive   敏感应用过滤（前台应用身份）
 internal/sync        WebDAV 增量同步 + 端到端加密
 internal/backup      CNST1 加密容器
 internal/update      检查更新（Gitee / GitHub / 自动 / 自定义源，只查不装）
-tools/               发版、安装脚本与验证工具（非产品代码）
+tools/               发版、安装脚本、验证工具（非产品代码）
+site/                官网静态页（中文默认 + en/，共用 style.css；纯静态不引 Node）
 docs/                路线图、执行计划、发布流程
 ```
 
