@@ -87,6 +87,9 @@ docs/            路线图、执行计划、验证记录
 28. **录快捷键要靠 `Element.HandleInput`，别用输入框**：输入框会把带 ⌘ 的组合当文本编辑命令吃掉，用户还得手打 `CmdOrCtrl+Shift+V` 这种语法。做法是 `ui.Row(...).Focusable().HandleInput(...)`（带 ⌘/⌃/⌥/⇧ 或 F1–F12 才算组合键，见 `AcceleratorFromInput`），点一下进入录制态、Esc/点别处退出。**录制期间要把当前全局快捷键摘掉**，否则按到旧组合时 Carbon 照样触发、面板被唤出，录制框根本收不到键；退出（含关窗、重开）一定要挂回去
 29. **`mygo.GlobalShortcut.Register` 在 headless 测试里会永久卡住**：它把活投给主线程再等回音，测试进程没有事件循环在跑。`registerShortcut`/`unregisterShortcut` 这两个包级变量就是给测试替的（`fakeShortcuts`）
 
+30. **样式别写死在视图里**：字号/圆角/控件高度/间距全从 `internal/app/theme.go` 取（`fsBody`/`rCtl`/`hMD`/`sp2`…），颜色走 `themeFor(c)` 与 `colorsOf(c)`。面板是 `VibrancyHUD` 毛玻璃，表面色是**半透明 alpha**，手写 `ui.Hex` 会把材质盖死；`themeFor` 每帧在 View 入口调一次（内部按亮暗/材质/强调色缓存）。视图改名/改布局后复跑 `go run ./cmd/uishot` 出图比对——**毛玻璃观感 headless 看不出来，必须真机看**。两条踩过的红线：①**毛玻璃下 `themeFor` 必须把 `Theme.Background` 置 `ui.Transparent`**——窗口根会先铺一遍 `Theme.Background`，视图根再铺一遍 `pal.canvas`，两层 0.75 叠起来就是 94% 不透明，材质全被盖掉（症状：面板「只有白底」）；②**叠在材质上的小字要有自己的承载层**，底栏走 `pal.bar` + 正文色，别用 `TextMuted`（背后是深色窗口时灰字直接糊掉，`uishot -glass` 出图再用 `/tmp/pix/comp.go` 合成到深色底上就能复现）
+31. **快捷键唤出看「窗口是否被盖住」，不能看 `IsVisible()`，也不能看 `IsFocused()`**：`isKeyWindow` 是 **app 内**状态，面板被别的 app 完全盖住之后它仍然是 true（实测：`TOGGLE visible=true focused=true → dismiss`，于是第一下把看不见的面板藏了、第二下才显示 —— 就是「要按两次才到台前」）。正解是 `c.WindowHidden()`（macOS `occlusionState`，被完全遮挡时为真）：面板视图每帧无条件问一次并记进 `App.panelHidden`，`TogglePanel` 走 `toggleAction(visible, hidden)` 三态——不可见 → `Show()`、可见且 hidden → `Raise()`（置顶 + 抢键盘，**不重置**搜索词与选中行）、其余 → `Dismiss()`。「置顶 1.2 秒后降级」的定时器用 `topSeq` 只认最后一次，连按两次不会互相踩
+
 ## 每轮收尾
 
 - `go test ./...` 全绿、`go vet ./...` 无新告警

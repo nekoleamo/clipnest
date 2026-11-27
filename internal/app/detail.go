@@ -148,7 +148,8 @@ func (a *App) invalidateImage() {
 
 // DetailView 是详情窗的视图：图片居中、长文本可滚动，点一下或 Esc 关闭。
 func (a *App) DetailView(c *ui.Context) {
-	th := c.Theme()
+	th := themeFor(c)
+	pal := colorsOf(c)
 	a.mu.Lock()
 	row := a.imageRow
 	a.mu.Unlock()
@@ -158,15 +159,15 @@ func (a *App) DetailView(c *ui.Context) {
 	c.OnWindowShortcut(0, ui.KeyLeft, func() { a.StepDetail(-1) })
 	c.OnWindowShortcut(0, ui.KeyRight, func() { a.StepDetail(1) })
 
-	root := ui.Column(c).Fill().Padding(10).Gap(6).Background(th.Background)
+	root := ui.Column(c).Fill().Padding(sp2).Gap(sp1).Background(pal.canvas)
 	root.OnClick(func() { a.later(a.HideImage) })
 	root.Children(func() {
 		if row.Kind != model.KindImage {
 			// 文本：整段铺满，能滚；不截断也不再点一下关（点了会误关，键盘 Esc 足够）
 			ui.Scroll(c).Grow(1).Children(func() {
-				ui.Text(c, row.Content).FontSize(12).TextColor(th.Text).Wrap()
+				ui.Text(c, row.Content).FontSize(fsFootnote).TextColor(th.Text).Wrap()
 			})
-			ui.Text(c, fmtDetailHint(row)).FontSize(11).TextColor(th.TextMuted)
+			ui.Text(c, fmtDetailHint(row)).FontSize(fsCaption).TextColor(th.TextMuted)
 			return
 		}
 		if row.OriginPath != "" {
@@ -181,7 +182,7 @@ func (a *App) DetailView(c *ui.Context) {
 			}
 		}
 		hint := fmtSize(row)
-		ui.Text(c, hint+" · 点任意处或 Esc 关闭").FontSize(11).TextColor(th.TextMuted)
+		ui.Text(c, hint+" · 点任意处或 Esc 关闭").FontSize(fsCaption).TextColor(th.TextMuted)
 	})
 	// 本窗口也排了延后动作（点任意处关窗）：必须在自己的帧末跑掉。
 	// a.runPending 只在面板视图里跑的话，只开着预览窗时点了没反应。

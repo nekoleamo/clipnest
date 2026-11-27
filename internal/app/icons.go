@@ -54,6 +54,6 @@ func iconAction(c *ui.Context, th *ui.Theme, icon *ui.SVG, label string, onClick
 		if icon != nil {
 			ui.Icon(c, icon).Size(actionIconSz, actionIconSz).TextColor(th.Text)
 		}
-		ui.Text(c, label).FontSize(11).TextColor(th.Text)
+		ui.Text(c, label).FontSize(fsCaption).TextColor(th.Text)
 	})
 }

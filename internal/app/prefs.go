@@ -58,11 +58,11 @@ type prefsForm struct {
 	passphrase string
 	// webdavPass 是 WebDAV 账号口令，存 clipnest-webdav/<设备名>；两者可以不同
 	webdavPass string
-	insecure    bool
-	encrypt     bool
-	realtime    bool
-	interval    float64
-	pullSecs    float64
+	insecure   bool
+	encrypt    bool
+	realtime   bool
+	interval   float64
+	pullSecs   float64
 }
 
 // loadPrefsFormLocked 用已保存的配置填一遍草稿（调用方持有 a.mu）。
@@ -203,10 +203,11 @@ func (a *App) SavePrefs() {
 
 // prefsView 是设置窗：改完点保存写回 settings.json / sync.json。
 func (a *App) prefsView(c *ui.Context) {
-	th := c.Theme()
+	th := themeFor(c)
+	pal := colorsOf(c)
 	f := a.PrefsForm()
 
-	col := ui.Column(c).Fill().Gap(10).Padding(16).Background(th.Background)
+	col := ui.Column(c).Fill().Gap(sp4).Padding(sp4).Background(pal.canvas)
 	// 录制快捷键时点到别处就当取消（不然焦点走了还挂着「按下组合键…」，
 	// 而那时旧快捷键已经被摘掉，等于用户没了唤出键）。刚点进录制框的那一下
 	// 早在上一帧就结束了，不会被这里误判。
@@ -219,243 +220,252 @@ func (a *App) prefsView(c *ui.Context) {
 	col.Children(func() {
 		ui.Scroll(c).Fill().TrackScroll(&f.scroll).KeepScrollbars(true).Children(func() {
 			ui.Column(c).Gap(10).Children(func() {
-				ui.Text(c, "clipnest 设置").FontSize(16).Bold().TextColor(th.Text)
+				ui.Text(c, "clipnest 设置").FontSize(fsTitle).Bold().TextColor(th.Text)
+				section(c, "基础", pal, func() {
 
-				label(c, "历史保留条数（0 = 不限）", th)
-				ui.NumberInput(c, &f.maxItems, 0, 1_000_000, 100)
+					label(c, "历史保留条数（0 = 不限）", th)
+					ui.NumberInput(c, &f.maxItems, 0, 1_000_000, 100)
 
-				label(c, "面板高度（点）", th)
-				ui.NumberInput(c, &f.panelHeight, float64(settings.PanelHeightMin), float64(settings.PanelHeightMax), 20)
+					label(c, "面板高度（点）", th)
+					ui.NumberInput(c, &f.panelHeight, float64(settings.PanelHeightMin), float64(settings.PanelHeightMax), 20)
 
-				label(c, "面板位置", th)
-				ui.Segmented(c, &f.position, "屏幕居中", "贴屏幕底部")
+					label(c, "面板位置", th)
+					ui.Segmented(c, &f.position, "屏幕居中", "贴屏幕底部")
 
-				label(c, "唤起快捷键（点右边的框，然后在键盘上按组合键；Esc 取消）", th)
-				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					a.shortcutRecorder(c, f, th)
-					if ui.Button(c, "恢复默认").Clicked() {
-						a.ApplyShortcutDraft(settings.DefaultShortcut)
-					}
-				})
-				if f.recordHint != "" {
-					ui.Text(c, f.recordHint).FontSize(11).TextColor(th.TextMuted)
-				}
-				if msg := a.ShortcutMessage(); msg != "" {
-					ui.Text(c, msg).FontSize(11).TextColor(th.TextMuted)
-				}
-
-				ui.Divider(c)
-				ui.Text(c, "历史清理").FontSize(14).Bold().TextColor(th.Text)
-				label(c, "清掉多少天之前的条目（收藏与置顶受保护）", th)
-				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					ui.NumberInput(c, &f.pruneDays, 1, 3650, 1)
-					if ui.Button(c, "按天数清理").Clicked() {
-						f.status = a.PruneOlderThanDays(int(f.pruneDays))
-					}
-				})
-				// 清空是唯一不可撤销的操作：要点两下、输入「清空」、而且必须先备份
-				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					if a.ClearConfirming() {
-						ui.TextInput(c, &f.clearWord).Placeholder("输入 清空").Width(110)
-						confirm := ui.Button(c, "确认清空（先自动备份）")
-						confirm.Disabled(f.clearWord != "清空")
-						if confirm.Clicked() {
-							f.status = a.ClearAllHistoryWithBackup(f.passphrase)
-							f.clearWord = ""
-						}
-						if ui.Button(c, "取消").Clicked() {
-							f.clearWord = ""
-							a.CancelClearAll()
-						}
-					} else if ui.Button(c, "清空全部历史…").Clicked() {
-						f.clearWord = ""
-						a.AskClearAll()
-					}
-				})
-				if a.ClearConfirming() {
-					label(c, "⚠️ 清空前会先导一份加密备份到 backups/（用「加密口令」，没填就用凭据里存着的；两者都没有就不清）", th)
-				}
-
-				label(c, "敏感应用白名单（每行一个 bundle id / 进程名；留空用内置表）", th)
-				ui.TextArea(c, &f.sensitiveApps).Height(90)
-				ui.Checkbox(c, &f.ignoreSensitive, "按应用过滤敏感内容（关掉则不拦）")
-
-				label(c, "导出目录（留空 = ~/Downloads）", th)
-				ui.TextInput(c, &f.exportDir)
-
-				ui.Divider(c)
-				ui.Text(c, "同步").FontSize(14).Bold().TextColor(th.Text)
-				ui.Checkbox(c, &f.syncOn, "启用同步")
-				label(c, "本机名称（远端文件名用）", th)
-				ui.TextInput(c, &f.deviceName)
-				label(c, "同步方式", th)
-				ui.Segmented(c, &f.backendKind, "本地目录 / 网盘", "WebDAV")
-				if f.backendKind == 0 {
-					label(c, "本地目录（网盘同步盘、移动硬盘都行）", th)
-					ui.TextInput(c, &f.syncDir)
-				} else {
-					label(c, "WebDAV 地址（如 https://nas.local:5006/data/dav）", th)
-					ui.TextInput(c, &f.remoteURL)
-					label(c, "备用地址（Tailscale / 外网；局域网不通时自动切过去）", th)
-					ui.TextInput(c, &f.fallbackURL).Placeholder("https://nas.<tailnet>.ts.net:5006")
-					label(c, "WebDAV 用户名", th)
-					ui.TextInput(c, &f.remoteUser)
-					label(c, "WebDAV 账号口令（写进"+clipsync.SecretStoreName()+"，留空不改）", th)
-					ui.TextInput(c, &f.webdavPass).Placeholder("NAS 账号密码（留空不改）")
-					label(c, "远端目录", th)
-					ui.TextInput(c, &f.remoteDir)
-					ui.Checkbox(c, &f.insecure, "允许自签证书（NAS 常见，有风险）")
-				}
-				// 加密口令不分同步方式（本地目录也要加密），而且两台机器必须是同一个。
-				// 它和 WebDAV 账号口令是两回事，各存各的条目，别混。
-				label(c, "加密口令（端到端加密与备份共用；两台机器要填同一个，写进"+clipsync.SecretStoreName()+"，留空不改）", th)
-				ui.TextInput(c, &f.passphrase).Placeholder("加密口令（留空不改）")
-				ui.Checkbox(c, &f.encrypt, "端到端加密（用口令派生密钥）")
-				label(c, "自动同步间隔（秒；<60 不自动跑）", th)
-				ui.NumberInput(c, &f.interval, 0, 86400, 300)
-				ui.Checkbox(c, &f.realtime, "实时同步（复制后立即推，并按下面间隔拉取）")
-				label(c, "实时拉取间隔（秒，2–300）", th)
-				ui.NumberInput(c, &f.pullSecs, 2, 300, 1)
-				// 水位只会往前走：对端漏了某一包（旧版覆盖写、包过期、换过库）就补不回来，
-				// 所以要有一个「重新推一遍」的入口
-				label(c, "对端缺历史时（换过库 / 旧版本覆盖写过 / 包过期）用这个补齐", th)
-				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					if ui.Button(c, "重新推送全部历史…").Clicked() {
-						f.status = "" // 过程与结果都在下面那行同步状态里，别在这儿留一条
-						if msg := a.RepushAllHistory(); msg != "" {
-							f.status = msg
-						}
-					}
-					ui.Text(c, fmt.Sprintf("本机 %d 条", a.Total())).FontSize(11).TextColor(th.TextMuted)
-				})
-
-				ui.Divider(c)
-				ui.Text(c, "分组").FontSize(14).Bold().TextColor(th.Text)
-				label(c, "面板右栏给单条条目选组；同步按名字对齐", th)
-				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					ui.TextInput(c, a.NewGroupDraft()).Placeholder("新分组名字").Width(200)
-					if ui.Button(c, "新建").Clicked() {
-						if _, err := a.CreateGroup(*a.NewGroupDraft()); err == nil {
-							*a.NewGroupDraft() = ""
-						}
-					}
-				})
-				groups := a.Groups()
-				if len(groups) == 0 {
-					ui.Text(c, "还没有分组").FontSize(11).TextColor(th.TextMuted)
-				}
-				counts, _ := db.GroupCounts(a.Store.DB)
-				for _, g := range groups {
-					gid := g.ID
+					label(c, "唤起快捷键（点右边的框，然后在键盘上按组合键；Esc 取消）", th)
 					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-						ui.TextInput(c, a.RenameDraft(gid, g.Name)).Width(200)
-						ui.Text(c, fmt.Sprintf("%d 条", counts[gid])).FontSize(10).TextColor(th.TextMuted)
-						if ui.Button(c, "改名").Clicked() {
-							_ = a.RenameGroup(gid, *a.RenameDraft(gid, g.Name))
-						}
-						if ui.Button(c, "删除").Clicked() {
-							_ = a.DeleteGroup(gid)
+						a.shortcutRecorder(c, f, th)
+						if ui.Button(c, "恢复默认").Clicked() {
+							a.ApplyShortcutDraft(settings.DefaultShortcut)
 						}
 					})
+					if f.recordHint != "" {
+						ui.Text(c, f.recordHint).FontSize(fsCaption).TextColor(th.TextMuted)
+					}
+					if msg := a.ShortcutMessage(); msg != "" {
+						ui.Text(c, msg).FontSize(fsCaption).TextColor(th.TextMuted)
+					}
+
+				})
+
+				section(c, "历史清理", pal, func() {
+					label(c, "清掉多少天之前的条目（收藏与置顶受保护）", th)
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+						ui.NumberInput(c, &f.pruneDays, 1, 3650, 1)
+						if ui.Button(c, "按天数清理").Clicked() {
+							f.status = a.PruneOlderThanDays(int(f.pruneDays))
+						}
+					})
+					// 清空是唯一不可撤销的操作：要点两下、输入「清空」、而且必须先备份
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+						if a.ClearConfirming() {
+							ui.TextInput(c, &f.clearWord).Placeholder("输入 清空").Width(110)
+							confirm := ui.Button(c, "确认清空（先自动备份）")
+							confirm.Disabled(f.clearWord != "清空")
+							if confirm.Clicked() {
+								f.status = a.ClearAllHistoryWithBackup(f.passphrase)
+								f.clearWord = ""
+							}
+							if ui.Button(c, "取消").Clicked() {
+								f.clearWord = ""
+								a.CancelClearAll()
+							}
+						} else if ui.Button(c, "清空全部历史…").Clicked() {
+							f.clearWord = ""
+							a.AskClearAll()
+						}
+					})
+					if a.ClearConfirming() {
+						label(c, "⚠️ 清空前会先导一份加密备份到 backups/（用「加密口令」，没填就用凭据里存着的；两者都没有就不清）", th)
+					}
+
+					label(c, "敏感应用白名单（每行一个 bundle id / 进程名；留空用内置表）", th)
+					ui.TextArea(c, &f.sensitiveApps).Height(90)
+					ui.Checkbox(c, &f.ignoreSensitive, "按应用过滤敏感内容（关掉则不拦）")
+
+					label(c, "导出目录（留空 = ~/Downloads）", th)
+					ui.TextInput(c, &f.exportDir)
+
+				})
+
+				section(c, "同步", pal, func() {
+					ui.Checkbox(c, &f.syncOn, "启用同步")
+					label(c, "本机名称（远端文件名用）", th)
+					ui.TextInput(c, &f.deviceName)
+					label(c, "同步方式", th)
+					ui.Segmented(c, &f.backendKind, "本地目录 / 网盘", "WebDAV")
+					if f.backendKind == 0 {
+						label(c, "本地目录（网盘同步盘、移动硬盘都行）", th)
+						ui.TextInput(c, &f.syncDir)
+					} else {
+						label(c, "WebDAV 地址（如 https://nas.local:5006/data/dav）", th)
+						ui.TextInput(c, &f.remoteURL)
+						label(c, "备用地址（Tailscale / 外网；局域网不通时自动切过去）", th)
+						ui.TextInput(c, &f.fallbackURL).Placeholder("https://nas.<tailnet>.ts.net:5006")
+						label(c, "WebDAV 用户名", th)
+						ui.TextInput(c, &f.remoteUser)
+						label(c, "WebDAV 账号口令（写进"+clipsync.SecretStoreName()+"，留空不改）", th)
+						ui.TextInput(c, &f.webdavPass).Placeholder("NAS 账号密码（留空不改）")
+						label(c, "远端目录", th)
+						ui.TextInput(c, &f.remoteDir)
+						ui.Checkbox(c, &f.insecure, "允许自签证书（NAS 常见，有风险）")
+					}
+					// 加密口令不分同步方式（本地目录也要加密），而且两台机器必须是同一个。
+					// 它和 WebDAV 账号口令是两回事，各存各的条目，别混。
+					label(c, "加密口令（端到端加密与备份共用；两台机器要填同一个，写进"+clipsync.SecretStoreName()+"，留空不改）", th)
+					ui.TextInput(c, &f.passphrase).Placeholder("加密口令（留空不改）")
+					ui.Checkbox(c, &f.encrypt, "端到端加密（用口令派生密钥）")
+					label(c, "自动同步间隔（秒；<60 不自动跑）", th)
+					ui.NumberInput(c, &f.interval, 0, 86400, 300)
+					ui.Checkbox(c, &f.realtime, "实时同步（复制后立即推，并按下面间隔拉取）")
+					label(c, "实时拉取间隔（秒，2–300）", th)
+					ui.NumberInput(c, &f.pullSecs, 2, 300, 1)
+					// 水位只会往前走：对端漏了某一包（旧版覆盖写、包过期、换过库）就补不回来，
+					// 所以要有一个「重新推一遍」的入口
+					label(c, "对端缺历史时（换过库 / 旧版本覆盖写过 / 包过期）用这个补齐", th)
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+						if ui.Button(c, "重新推送全部历史…").Clicked() {
+							f.status = "" // 过程与结果都在下面那行同步状态里，别在这儿留一条
+							if msg := a.RepushAllHistory(); msg != "" {
+								f.status = msg
+							}
+						}
+						ui.Text(c, fmt.Sprintf("本机 %d 条", a.Total())).FontSize(fsCaption).TextColor(th.TextMuted)
+					})
+
+				})
+
+				section(c, "分组", pal, func() {
+					label(c, "面板右栏给单条条目选组；同步按名字对齐", th)
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+						ui.TextInput(c, a.NewGroupDraft()).Placeholder("新分组名字").Width(200)
+						if ui.Button(c, "新建").Clicked() {
+							if _, err := a.CreateGroup(*a.NewGroupDraft()); err == nil {
+								*a.NewGroupDraft() = ""
+							}
+						}
+					})
+					groups := a.Groups()
+					if len(groups) == 0 {
+						ui.Text(c, "还没有分组").FontSize(fsCaption).TextColor(th.TextMuted)
+					}
+					counts, _ := db.GroupCounts(a.Store.DB)
+					for _, g := range groups {
+						gid := g.ID
+						ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+							ui.TextInput(c, a.RenameDraft(gid, g.Name)).Width(200)
+							ui.Text(c, fmt.Sprintf("%d 条", counts[gid])).FontSize(fsTiny).TextColor(th.TextMuted)
+							if ui.Button(c, "改名").Clicked() {
+								_ = a.RenameGroup(gid, *a.RenameDraft(gid, g.Name))
+							}
+							if ui.Button(c, "删除").Clicked() {
+								_ = a.DeleteGroup(gid)
+							}
+						})
+					}
+
+				})
+
+				section(c, "备份", pal, func() {
+					label(c, "导出整个历史成一个加密 .cnbak（用上面的加密口令）", th)
+					ui.Row(c).Gap(8).Children(func() {
+						if ui.Button(c, "导出备份").Clicked() {
+							if f.passphrase == "" {
+								f.status = "⚠️ 请先填加密口令再导出"
+							} else if path, err := backup.ExportTo(a.Store.DB, a.Paths, f.passphrase); err != nil {
+								f.status = "❌ 导出失败：" + err.Error()
+							} else {
+								f.status = "✅ 已导出 " + baseName(path)
+							}
+						}
+						if ui.Button(c, "导入备份…").Clicked() {
+							if f.passphrase == "" {
+								f.status = "⚠️ 请先填加密口令再导入"
+							} else if path := a.pickBackupFile(); path == "" {
+								f.status = "已取消导入"
+							} else if report, err := backup.Import(a.Store.DB, path, f.passphrase); err != nil {
+								f.status = "❌ 导入失败：" + err.Error()
+							} else {
+								f.status = fmt.Sprintf("✅ 导入 %d 条（跳过 %d）来自 %s",
+									report.Inserted, report.Skipped, baseName(path))
+								a.Refresh()
+							}
+						}
+					})
+
+				})
+
+				section(c, "开机启动", pal, func() {
+					ui.Row(c).Gap(8).Children(func() {
+						if ui.Button(c, "设为登录时启动").Clicked() {
+							if err := mygo.App.SetOpenAtLogin(true); err != nil {
+								f.status = "❌ " + err.Error()
+							} else {
+								f.status = "✅ 已设为登录时启动"
+							}
+						}
+						if ui.Button(c, "取消登录启动").Clicked() {
+							if err := mygo.App.SetOpenAtLogin(false); err != nil {
+								f.status = "❌ " + err.Error()
+							} else {
+								f.status = "✅ 已取消"
+							}
+						}
+					})
+				})
+			})
+
+			section(c, "版本与更新", pal, func() {
+				label(c, fmt.Sprintf("当前版本 %s · 只检查不自动装（未签名，装包要你自己点）", a.AppVersion()), th)
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+					// 更新源下拉：切了就立刻存（不然点「检查更新」还按旧源跑）
+					srcIdx := update.IndexOf(*a.UpdateSourceDraft())
+					pick := update.SourceLabels[srcIdx]
+					ui.Select(c, &pick, update.SourceLabels).Width(96)
+					if pick != update.SourceLabels[srcIdx] {
+						chosen := update.SourceOf(pick)
+						a.later(func() { a.switchUpdateSource(chosen) })
+					}
+					ui.TextInput(c, a.UpdateRepoDraft()).Placeholder("仓库（留空用内置镜像）").Grow(1)
+					if ui.Button(c, "保存更新源").Clicked() {
+						a.later(func() {
+							a.SaveUpdateSource(*a.UpdateSourceDraft(), *a.UpdateRepoDraft(), *a.UpdateAPIBaseDraft())
+						})
+					}
+				})
+
+				// 自定义源要填 API 根，自动源给一句说明：都很长，各占一行（与上面那行挤会溢出）
+				switch *a.UpdateSourceDraft() {
+				case update.SourceCustom:
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+						ui.Text(c, "API 根").FontSize(fsCaption).TextColor(th.TextMuted)
+						ui.TextInput(c, a.UpdateAPIBaseDraft()).Placeholder("https://api.github.com").Grow(1)
+					})
+				case update.SourceAuto:
+					label(c, "自动：先查 Gitee，不通再查 GitHub（国内推荐）", th)
 				}
 
-				ui.Divider(c)
-				ui.Text(c, "备份").FontSize(14).Bold().TextColor(th.Text)
-				label(c, "导出整个历史成一个加密 .cnbak（用上面的加密口令）", th)
-				ui.Row(c).Gap(8).Children(func() {
-					if ui.Button(c, "导出备份").Clicked() {
-						if f.passphrase == "" {
-							f.status = "⚠️ 请先填加密口令再导出"
-						} else if path, err := backup.ExportTo(a.Store.DB, a.Paths, f.passphrase); err != nil {
-							f.status = "❌ 导出失败：" + err.Error()
-						} else {
-							f.status = "✅ 已导出 " + baseName(path)
+				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+					if a.UpdateChecking() {
+						ui.Text(c, "检查中…").FontSize(fsCaption).TextColor(th.TextMuted)
+					} else if ui.Button(c, "检查更新").Clicked() {
+						a.later(a.CheckUpdate)
+					}
+					msg, hasURL := a.UpdateStatus()
+					if hasURL {
+						if ui.Button(c, "打开发布页").Clicked() {
+							a.later(a.OpenReleasePage)
 						}
 					}
-					if ui.Button(c, "导入备份…").Clicked() {
-						if f.passphrase == "" {
-							f.status = "⚠️ 请先填加密口令再导入"
-						} else if path := a.pickBackupFile(); path == "" {
-							f.status = "已取消导入"
-						} else if report, err := backup.Import(a.Store.DB, path, f.passphrase); err != nil {
-							f.status = "❌ 导入失败：" + err.Error()
-						} else {
-							f.status = fmt.Sprintf("✅ 导入 %d 条（跳过 %d）来自 %s",
-								report.Inserted, report.Skipped, baseName(path))
-							a.Refresh()
-						}
+					if msg != "" {
+						ui.Text(c, msg).FontSize(fsCaption).TextColor(th.TextMuted)
 					}
 				})
 
-				ui.Divider(c)
-				label(c, "开机启动", th)
-				ui.Row(c).Gap(8).Children(func() {
-					if ui.Button(c, "设为登录时启动").Clicked() {
-						if err := mygo.App.SetOpenAtLogin(true); err != nil {
-							f.status = "❌ " + err.Error()
-						} else {
-							f.status = "✅ 已设为登录时启动"
-						}
-					}
-					if ui.Button(c, "取消登录启动").Clicked() {
-						if err := mygo.App.SetOpenAtLogin(false); err != nil {
-							f.status = "❌ " + err.Error()
-						} else {
-							f.status = "✅ 已取消"
-						}
-					}
-				})
 			})
 		})
 
 		ui.Divider(c)
-		ui.Text(c, "版本与更新").FontSize(14).Bold().TextColor(th.Text)
-		label(c, fmt.Sprintf("当前版本 %s · 只检查不自动装（未签名，装包要你自己点）", a.AppVersion()), th)
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			// 更新源下拉：切了就立刻存（不然点「检查更新」还按旧源跑）
-			srcIdx := update.IndexOf(*a.UpdateSourceDraft())
-			pick := update.SourceLabels[srcIdx]
-			ui.Select(c, &pick, update.SourceLabels).Width(96)
-			if pick != update.SourceLabels[srcIdx] {
-				chosen := update.SourceOf(pick)
-				a.later(func() { a.switchUpdateSource(chosen) })
-			}
-			ui.TextInput(c, a.UpdateRepoDraft()).Placeholder("仓库（留空用内置镜像）").Grow(1)
-			if ui.Button(c, "保存更新源").Clicked() {
-				a.later(func() {
-					a.SaveUpdateSource(*a.UpdateSourceDraft(), *a.UpdateRepoDraft(), *a.UpdateAPIBaseDraft())
-				})
-			}
-		})
-
-		// 自定义源要填 API 根，自动源给一句说明：都很长，各占一行（与上面那行挤会溢出）
-		switch *a.UpdateSourceDraft() {
-		case update.SourceCustom:
-			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "API 根").FontSize(11).TextColor(th.TextMuted)
-				ui.TextInput(c, a.UpdateAPIBaseDraft()).Placeholder("https://api.github.com").Grow(1)
-			})
-		case update.SourceAuto:
-			label(c, "自动：先查 Gitee，不通再查 GitHub（国内推荐）", th)
-		}
-
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			if a.UpdateChecking() {
-				ui.Text(c, "检查中…").FontSize(11).TextColor(th.TextMuted)
-			} else if ui.Button(c, "检查更新").Clicked() {
-				a.later(a.CheckUpdate)
-			}
-			msg, hasURL := a.UpdateStatus()
-			if hasURL {
-				if ui.Button(c, "打开发布页").Clicked() {
-					a.later(a.OpenReleasePage)
-				}
-			}
-			if msg != "" {
-				ui.Text(c, msg).FontSize(11).TextColor(th.TextMuted)
-			}
-		})
-
 		ui.Row(c).Gap(8).Children(func() {
 			if ui.PrimaryButton(c, "保存").Clicked() {
 				a.SavePrefs()
@@ -470,12 +480,12 @@ func (a *App) prefsView(c *ui.Context) {
 		})
 
 		if syncMsg := a.SyncStatus(); syncMsg != "" {
-			ui.Text(c, syncMsg).FontSize(11).TextColor(syncStatusColor(syncMsg, th))
+			ui.Text(c, syncMsg).FontSize(fsCaption).TextColor(syncStatusColor(syncMsg, th))
 		}
 		if f.status != "" {
-			ui.Text(c, f.status).FontSize(11).TextColor(th.Text)
+			ui.Text(c, f.status).FontSize(fsCaption).TextColor(th.Text)
 		}
-		ui.Text(c, fmt.Sprintf("数据目录：%s", a.Paths.Root())).FontSize(10).TextColor(th.TextMuted)
+		ui.Text(c, fmt.Sprintf("数据目录：%s", a.Paths.Root())).FontSize(fsTiny).TextColor(th.TextMuted)
 	})
 	// 本窗口也排了延后动作（切更新源、检查更新…）：必须在自己的帧末跑掉。
 	// a.runPending 只在面板视图里跑的话，这里排的活永远等不到执行。
@@ -496,7 +506,7 @@ func syncStatusColor(msg string, th *ui.Theme) ui.Color {
 }
 
 func label(c *ui.Context, text string, th *ui.Theme) {
-	ui.Text(c, text).FontSize(11).TextColor(th.TextMuted)
+	ui.Text(c, text).FontSize(fsCaption).TextColor(th.TextMuted)
 }
 
 // shortcutRecorder 是「点一下、再按组合键」的快捷键录制框。
@@ -516,7 +526,7 @@ func (a *App) shortcutRecorder(c *ui.Context, f *prefsForm, th *ui.Theme) {
 		Gap(6).AlignItems(ui.Center).Justify(ui.Center).
 		Radius(th.Radius).Border(1, border).Background(th.Surface)
 	box.Children(func() {
-		ui.Text(c, text).FontSize(13).TextColor(fg)
+		ui.Text(c, text).FontSize(fsBody).TextColor(fg)
 	})
 	box.OnClick(func() { a.StartShortcutRecord() })
 	// 录制时自己吃掉键盘：换成输入框的话，带 ⌘ 的组合会被当成文本编辑命令

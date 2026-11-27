@@ -80,6 +80,8 @@ type App struct {
 	imageWin    *mygo.Window // 「点预览图放大看」的独立窗口
 	imageRow    Row          // 大图窗正在显示的那条
 	ready       bool         // 窗口都建好了：之前调 Invalidate 会等主线程而死锁
+	topSeq      int          // 「置顶 1.2 秒」的序号，只认最后一次
+	panelHidden atomic.Bool  // 面板是否被别的窗口完全盖住（面板视图每帧从 c.WindowHidden() 更新）
 	visible     bool
 	searchInput ui.Handle // 搜索框句柄：点过列表后把焦点还给它，方向键才不被滚动容器吃掉
 	searchCtx   *ui.Context
@@ -123,9 +125,9 @@ type App struct {
 	syncMsg string
 
 	// —— 设置窗的跨帧草稿 ——
-	form          prefsForm // 设置窗整张表的编辑草稿（见 prefs.go）
-	shortcutMsg   string
-	clearConfirm  bool
+	form         prefsForm // 设置窗整张表的编辑草稿（见 prefs.go）
+	shortcutMsg  string
+	clearConfirm bool
 	// 分组管理的草稿（跨帧保留，否则一个字就丢）
 	newGroupDraft string
 	renameDrafts  map[int64]*string

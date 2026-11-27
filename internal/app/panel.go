@@ -794,11 +794,78 @@ func (a *App) TogglePanel() {
 	if w == nil {
 		return
 	}
-	if w.IsVisible() {
+	act := toggleAction(w.IsVisible(), a.panelHidden.Load())
+	logf("TOGGLE visible=%v hidden=%v focused=%v → %d", w.IsVisible(), a.panelHidden.Load(), w.IsFocused(), act)
+	switch act {
+	case actShow:
+		a.Show()
+	case actRaise:
+		a.Raise()
+	default:
 		a.Dismiss()
+	}
+}
+
+// panelAction 是按快捷键要做的事，从 TogglePanel 里拎出来单测。
+type panelAction int
+
+const (
+	actDismiss panelAction = iota // 面板就在前面：收起
+	actRaise                      // 面板还显示着、但被别的窗口盖住了：拿到最前
+	actShow                       // 面板本来就是隐藏的：完整唤出
+)
+
+// toggleAction 只按「可不可见」「是不是被盖住了」判断。
+//
+// 不能看 IsFocused：isKeyWindow 是 app 内的状态，面板被别的 app 盖住之后它仍是 true
+// （实测：这正是「要按两次才到台前」的原因——第一次按被当成「开着，收起」）。
+func toggleAction(visible, hidden bool) panelAction {
+	switch {
+	case !visible:
+		return actShow
+	case hidden:
+		return actRaise
+	default:
+		return actDismiss
+	}
+}
+
+// Raise 把还在屏上、但被别的窗口盖住的面板拿回最前：不重置状态、不重算位置，
+// 用户之前打的搜索词和选中的行都留着。
+func (a *App) Raise() {
+	w := a.panelWindow()
+	if w == nil {
 		return
 	}
-	a.Show()
+	logf("RAISE")
+	paste.RememberForeground()
+	a.panelHidden.Store(false)
+	w.SetAlwaysOnTop(true)
+	w.Show()
+	w.Focus()
+	a.dropTopAfter(w)
+	if !paste.ClaimForeground() {
+		logf("PANEL claim-foreground refused")
+	}
+}
+
+// dropTopAfter 排一次「1.2 秒后降回普通层级」：面板不该一直压着别人的窗口，
+// 但每次唤出/提到最前都要重新压一会儿。
+//
+// topSeq 只认最后一次：连续唤出两次时，先前排的定时器不会把最新那次置顶提前撤掉。
+func (a *App) dropTopAfter(w *mygo.Window) {
+	a.mu.Lock()
+	a.topSeq++
+	seq := a.topSeq
+	a.mu.Unlock()
+	time.AfterFunc(1200*time.Millisecond, func() {
+		a.mu.Lock()
+		cur := a.topSeq
+		a.mu.Unlock()
+		if cur == seq && w.IsVisible() {
+			w.SetAlwaysOnTop(false)
+		}
+	})
 }
 
 // ResetPanelState 把面板清回初始状态。
@@ -856,13 +923,10 @@ func (a *App) Show() {
 	w.SetPosition(d.WorkArea.X+(d.WorkArea.Width-width)/2, y)
 	// 唤出时置顶；1.2 秒后降回普通层级，这样它不会一直压着别的窗口，
 	// 但下次按快捷键唤出又会重新置顶。
+	a.panelHidden.Store(false)
 	w.SetAlwaysOnTop(true)
 	w.Show()
-	time.AfterFunc(1200*time.Millisecond, func() {
-		if w.IsVisible() {
-			w.SetAlwaysOnTop(false)
-		}
-	})
+	a.dropTopAfter(w)
 
 	// Windows 上面板是前台窗口才收得到键盘；macOS 上 NSPanel 自己就是 key window。
 	if !paste.ClaimForeground() {

@@ -30,6 +30,7 @@ func main() {
 	index := flag.Int("i", 0, "选中第几条（0 起）")
 	dark := flag.Bool("dark", true, "深色主题")
 	prefs := flag.Bool("prefs", false, "渲染设置窗而不是面板")
+	glass := flag.Bool("glass", false, "模拟毛玻璃材质（面板真实形态）")
 	src := flag.String("src", "", "设置窗里「更新源」的取值（github/gitee/custom，空=默认）")
 	flag.Parse()
 
@@ -60,6 +61,7 @@ func main() {
 	}
 	tester := ui.NewTester(view, *w, *h)
 	tester.SetDark(*dark)
+	tester.SetVibrancy(*glass)
 	tester.Frame()
 	tester.Frame()
 	tester.Frame()

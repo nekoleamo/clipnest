@@ -71,17 +71,22 @@ func bitmapCacheLen() int {
 
 // panelView 是面板的视图函数。
 func (a *App) panelView(c *ui.Context) {
-	th := c.Theme()
+	// 面板是否被别的窗口完全盖住：TogglePanel 靠它区分「在前面（该收起）」与
+	// 「被盖住了（该拿到最前）」。框架只在视图问过 WindowHidden 之后才在
+	// 「被盖住 / 重新露出」时各构建一帧，所以这里必须无条件问一次。
+	a.panelHidden.Store(c.WindowHidden())
+	th := themeFor(c)
+	pal := colorsOf(c)
 	// 面板是自绘的浮动窗：菜单也用窗口内画的那种，跟整体观感一致，
 	// 而且不依赖 app 是否在前台（系统菜单在非激活的 accessory app 里弹不出来）
 	// c.SetMenuPresentation(ui.PopoverMenus)
 
-	root := ui.Column(c).Fill().Gap(8).Padding(8).Background(th.Background)
+	root := ui.Column(c).Fill().Gap(sp2).Padding(sp3).Background(pal.canvas)
 	root.Children(func() {
 		// 顶部这条空白就是标题栏：按住拖可以移动面板（DragWindow 只认「最深命中元素」）
 		// 顶部居中的小把手：按住可以拖面板（没有标题栏，靠它移动）
 		ui.Row(c).Fill().Height(8).Justify(ui.Center).Children(func() {
-			grip := ui.Box(c).Size(80, 14).Radius(4).Background(th.Surface)
+			grip := ui.Box(c).Size(80, 14).Radius(7).Background(pal.hairlineStrong)
 			if b := grip.Bounds(); b.W > 0 && os.Getenv("CLIPNEST_DEBUG_RECTS") != "" {
 				px, py := 0, 0
 				if w := a.panelWindow(); w != nil {
@@ -96,7 +101,7 @@ func (a *App) panelView(c *ui.Context) {
 			// 把下面的搜索框/列表全顶到窗口外（测试里没 AX 授权就会踩到）
 			ui.Row(c).FillWidth().Gap(6).Children(func() {
 				ui.Text(c, "⚠️ 没有辅助功能授权，回车只复制不粘贴").
-					FontSize(11).TextColor(th.Warning).Grow(1)
+					FontSize(fsCaption).TextColor(th.Warning).Grow(1)
 				grantBtn := ui.Button(c, "去授权")
 				if b := grantBtn.Bounds(); b.W > 0 && os.Getenv("CLIPNEST_DEBUG_RECTS") != "" {
 					logf("RECT grant x=%.0f y=%.0f w=%.0f h=%.0f", b.X, b.Y, b.W, b.H)
@@ -146,7 +151,13 @@ func (a *App) panelView(c *ui.Context) {
 		if status := a.Status(); status != "" {
 			footer = status + " · " + footer
 		}
-		ui.Text(c, footer).FontSize(11).TextColor(th.Text)
+		// 底栏：只压一档中性叠色 + 顶边发丝线，别用实白底（深色背景下像贴了一条胶带）。
+		// 文字用正文色 —— 之前用 TextMuted 时，画布一透就跟着糊。
+		info := ui.Row(c).FillWidth().Padding(sp1, 4).Background(pal.hover).
+			BorderWidth(1, 0, 0, 0).BorderColor(pal.hairline)
+		info.Children(func() {
+			ui.Text(c, footer).FontSize(fsCaption).TextColor(th.Text)
+		})
 	})
 
 	a.runPending()
@@ -155,18 +166,21 @@ func (a *App) panelView(c *ui.Context) {
 // searchField 是搜索框（首次显示自动聚焦）；有内容时右侧出现清除按钮。
 func (a *App) searchField(c *ui.Context) ui.Element {
 	th := c.Theme()
+	pal := colorsOf(c)
 	q := a.Query()
-	row := ui.Row(c).FillWidth().Gap(6)
+	row := ui.Row(c).FillWidth().Gap(sp1)
 	row.Children(func() {
 		in := ui.TextInput(c, &q).
 			Placeholder("搜索剪贴板历史…").
-			FontSize(13).
-			Padding(8, 6).
-			Radius(6).
+			FontSize(fsBody).
+			Height(hMD).
+			Padding(sp2, 0).
+			Radius(rField).
 			Grow(1).
-			Background(th.Surface).
+			Background(pal.field).
+			Border(1, pal.hairline).
 			TextColor(th.Text).
-			PlaceholderColor(th.TextMuted).
+			PlaceholderColor(pal.textMuted).
 			CaretColor(th.Text).
 			AutoFocus().
 			Bind(&a.searchInput)
@@ -302,7 +316,7 @@ func (a *App) filterBar(c *ui.Context, l panelLayout) ui.Element {
 			if loaded := len(a.Rows()); a.HasMore() || int64(loaded) < total {
 				label = fmt.Sprintf("共 %d 条（已加载 %d）", total, loaded)
 			}
-			ui.Text(c, label).FontSize(10).TextColor(th.TextMuted)
+			ui.Text(c, label).FontSize(fsTiny).TextColor(th.Text)
 		}
 		// 剩下的空白当窗口拖拽把手（比手指还好用，且点不到任何控件）
 		ui.Box(c).Grow(1).FillHeight().DragWindow()
@@ -373,6 +387,7 @@ func (a *App) bindKeys(root ui.Element, c *ui.Context) {
 // listView 是左栏列表。
 func (a *App) listView(c *ui.Context) {
 	th := c.Theme()
+	pal := colorsOf(c)
 	q := a.Query()
 	rows := a.Rows()
 	sel, _ := a.Selection()
@@ -404,7 +419,8 @@ func (a *App) listView(c *ui.Context) {
 				for i := range rows {
 					index := i
 					row := rows[i]
-					bg := th.Background
+					// 行底透明：画布（以及它背后的毛玻璃材质）透上来，层次靠选中/勾选叠色
+					bg := ui.Transparent
 					if index == sel {
 						bg = th.Accent
 					}
@@ -416,7 +432,7 @@ func (a *App) listView(c *ui.Context) {
 					rowID := row.ID
 					marked := markedSet[row.ID]
 					if marked && index != sel {
-						bg = th.Surface // 勾上的行给个底色，与选中区分
+						bg = pal.hover // 勾上的行给个底色，与选中区分
 					}
 					// 点击/回调都在下一帧跑，所以先声明元素变量，回调里回头读它的 ClickModifiers
 					clicked := func(mods ui.Modifiers) {
@@ -435,8 +451,8 @@ func (a *App) listView(c *ui.Context) {
 					}
 					var rowEl ui.Element
 					rowEl = ui.Column(c).Key(fmt.Sprintf("row-%d", row.ID)).
-						Radius(6).
-						Padding(6, 4).
+						Radius(rField).
+						Padding(sp1, 4).
 						Background(bg).
 						OnClick(func() {
 							// ⌘/Ctrl 点击 = 勾选（批量删除用）；普通点击 = 选中
@@ -445,6 +461,10 @@ func (a *App) listView(c *ui.Context) {
 						}).
 						// 按住往窗口外拖 = 拖拽导出（文本给纯文本，图片/文件给文件）
 						DragDataFrom(func() transfer.Data { return a.DragData(rowID) })
+					// 悬停反馈：鼠标扫过时给一档叠色（选中/勾选行已有自己的底色）
+					if rowEl.Hovered() && index != sel && !marked {
+						rowEl.Background(pal.hover)
+					}
 					// 双击 = 粘贴。必须在构建期问：点击回调跑在下一帧，那时连击状态已经清了
 					if rowEl.DoubleClicked() {
 						a.later(dblPaste)
@@ -464,23 +484,23 @@ func (a *App) listView(c *ui.Context) {
 						}
 					}
 					rowEl.Children(func() {
-						ui.Row(c).Fill().Gap(6).Children(func() {
+						ui.Row(c).Fill().Gap(sp1).Children(func() {
 							if row.ThumbPath != "" {
 								if b := bitmapFor(row.ThumbPath); b != nil {
-									ui.Image(c, b).Size(thumbSize, thumbSize).Fit(ui.Contain).Radius(3)
+									ui.Image(c, b).Size(thumbSize, thumbSize).Fit(ui.Contain).Radius(4)
 								}
 							}
 							if marked {
-								ui.Text(c, "✓").FontSize(10).TextColor(fg)
+								ui.Text(c, "✓").FontSize(fsTiny).TextColor(fg)
 							} else if index < 9 {
-								ui.Text(c, Slot(index)).FontSize(9).TextColor(fg)
+								ui.Text(c, Slot(index)).FontSize(fsMicro).TextColor(fg)
 							}
-							ui.Text(c, row.Tag).FontSize(10).TextColor(fg)
+							ui.Text(c, row.Tag).FontSize(fsTiny).TextColor(fg)
 							if row.GroupName != "" {
-								ui.Text(c, "#"+row.GroupName).FontSize(9).TextColor(fg)
+								ui.Text(c, "#"+row.GroupName).FontSize(fsMicro).TextColor(fg)
 							}
 							if row.Note != "" {
-								ui.Text(c, "📝").FontSize(9).TextColor(fg)
+								ui.Text(c, "📝").FontSize(fsMicro).TextColor(fg)
 							}
 							mark := ""
 							if row.Pinned {
@@ -493,7 +513,7 @@ func (a *App) listView(c *ui.Context) {
 								mark += "🔒 "
 							}
 							var sumEl ui.Element
-							sumEl = a.summaryText(c, mark+row.Summary, q, fg, th).FontSize(12).TextColor(fg).Grow(1).Ellipsis("…").
+							sumEl = a.summaryText(c, mark+row.Summary, q, fg, th).FontSize(fsFootnote).TextColor(fg).Grow(1).Ellipsis("…").
 								OnClick(func() {
 									mods := sumEl.ClickModifiers()
 									a.later(func() { clicked(mods) })
@@ -503,9 +523,9 @@ func (a *App) listView(c *ui.Context) {
 								a.later(dblPaste)
 							}
 							if row.UseCount > 1 {
-								ui.Text(c, fmt.Sprintf("×%d", row.UseCount)).FontSize(9).TextColor(fg)
+								ui.Text(c, fmt.Sprintf("×%d", row.UseCount)).FontSize(fsMicro).TextColor(fg)
 							}
-							ui.Text(c, row.Time).FontSize(9).TextColor(fg)
+							ui.Text(c, row.Time).FontSize(fsMicro).TextColor(fg)
 						})
 					})
 				}
@@ -524,8 +544,8 @@ func (a *App) listView(c *ui.Context) {
 				if len(rows) == 0 {
 					title, hint := emptyState(a.Query())
 					ui.Column(c).Fill().Justify(ui.Center).AlignItems(ui.Center).Gap(4).Children(func() {
-						ui.Text(c, title).FontSize(13).TextColor(th.TextMuted)
-						ui.Text(c, hint).FontSize(11).TextColor(th.TextMuted)
+						ui.Text(c, title).FontSize(fsBody).TextColor(th.TextMuted)
+						ui.Text(c, hint).FontSize(fsCaption).TextColor(th.TextMuted)
 					})
 				}
 			})
@@ -539,10 +559,11 @@ func (a *App) listView(c *ui.Context) {
 // 内容区限高，备注吃掉剩余高度——列再高也不会显得空。
 func (a *App) previewView(c *ui.Context, l panelLayout) {
 	th := c.Theme()
+	pal := colorsOf(c)
 	row, ok := a.Selected()
 
-	card := ui.Column(c).Width(l.previewW).FillHeight().Gap(8).
-		Padding(12).Radius(10).Background(th.Surface).Justify(ui.Start).
+	card := liftCard(ui.Column(c).Width(l.previewW).FillHeight().Gap(sp2).
+		Padding(sp3).Radius(rPanel).Background(pal.panel).Border(1, pal.hairline).Justify(ui.Start), th.Dark).
 		// 点右栏空白/图片/卡片背景后把焦点还给搜索框，方向键继续选列表
 		OnClick(func() { a.later(a.refocusSearch) })
 	if b := card.Bounds(); b.H > 0 {
@@ -552,8 +573,8 @@ func (a *App) previewView(c *ui.Context, l panelLayout) {
 	card.Children(func() {
 		if !ok {
 			ui.Column(c).Fill().Justify(ui.Center).AlignItems(ui.Center).Gap(4).Children(func() {
-				ui.Text(c, "没有选中条目").FontSize(12).TextColor(th.TextMuted)
-				ui.Text(c, "用 ↑↓ 或点击左侧列表").FontSize(11).TextColor(th.TextMuted)
+				ui.Text(c, "没有选中条目").FontSize(fsFootnote).TextColor(th.TextMuted)
+				ui.Text(c, "用 ↑↓ 或点击左侧列表").FontSize(fsCaption).TextColor(th.TextMuted)
 			})
 			return
 		}
@@ -572,7 +593,7 @@ func (a *App) previewView(c *ui.Context, l panelLayout) {
 		case row.Kind == model.KindText || row.Kind == model.KindHtml || row.Kind == model.KindRtf:
 			// 只看个大概：截断显示；长文本给「查看全文」进详情窗（内嵌滚动没人爱用）
 			if content := excerpt(row.Content, 220); content != "" {
-				a.summaryText(c, content, a.Query(), th.Text, th).FontSize(12).Wrap().
+				a.summaryText(c, content, a.Query(), th.Text, th).FontSize(fsFootnote).Wrap().
 					MaxHeight(previewContentBudget(a.previewH))
 			}
 			if len([]rune(row.Content)) > 220 {
@@ -582,7 +603,7 @@ func (a *App) previewView(c *ui.Context, l panelLayout) {
 				}
 			}
 		case row.Kind == model.KindFiles:
-			ui.Text(c, excerpt(row.Content, 300)).FontSize(11).TextColor(th.TextMuted).Wrap()
+			ui.Text(c, excerpt(row.Content, 300)).FontSize(fsCaption).TextColor(th.TextMuted).Wrap()
 		}
 
 		ui.Divider(c)
@@ -590,23 +611,23 @@ func (a *App) previewView(c *ui.Context, l panelLayout) {
 
 		// 备注吃掉剩下的高度，卡片自然填满
 		ui.Row(c).Height(16).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "备注").FontSize(11).TextColor(th.TextMuted).Width(40)
+			ui.Text(c, "备注").FontSize(fsCaption).TextColor(th.TextMuted).Width(40)
 			n := len([]rune(row.Note))
 			counter := fmt.Sprintf("%d / %d", n, noteMaxRunes)
 			if n > noteMaxRunes {
 				counter = fmt.Sprintf("%d / %d（超出部分不会保存）", n, noteMaxRunes)
 			}
-			ui.Text(c, counter).FontSize(10).TextColor(th.TextMuted)
+			ui.Text(c, counter).FontSize(fsTiny).TextColor(th.TextMuted)
 		})
 		note := a.NoteValue(row.ID, row.Note)
-		if ui.TextArea(c, note).Grow(1).MinHeight(72).FontSize(11).
+		if ui.TextArea(c, note).Grow(1).MinHeight(72).FontSize(fsCaption).
 			Placeholder("写点什么，比如这条以后怎么找…").Changed() {
 			text := *note
 			a.later(func() { a.SaveNote(row.ID, text) })
 		}
 
 		// 动作：和键盘快捷键对应，省得去记
-		ui.Row(c).Height(30).Gap(6).Children(func() {
+		ui.Row(c).Height(hSM).Gap(sp1).Children(func() {
 			iconAction(c, th, IconCopy, "复制", func() {
 				r := row
 				a.later(func() { a.Copy(r) })
@@ -616,23 +637,24 @@ func (a *App) previewView(c *ui.Context, l panelLayout) {
 				a.later(func() { a.ExportTo(r) }) // 先选保存位置，不静默写到导出目录
 			})
 			ui.Box(c).Grow(1)
-			ui.Text(c, ModPrefix()+"Y / "+ModPrefix()+"O").FontSize(10).TextColor(th.TextMuted)
+			ui.Text(c, ModPrefix()+"Y / "+ModPrefix()+"O").FontSize(fsTiny).TextColor(th.TextMuted)
 		})
 	})
 }
 
 // previewHeader 是卡片顶部：类型胶囊 + 时间/次数 + 标记。
 func (a *App) previewHeader(c *ui.Context, row Row, th *ui.Theme) ui.Element {
-	head := ui.Row(c).Fill().Height(20).Gap(6).AlignItems(ui.Center)
+	pal := colorsOf(c)
+	head := ui.Row(c).Fill().Height(20).Gap(sp1).AlignItems(ui.Center)
 	head.Children(func() {
-		ui.Badge(c, row.Tag)
+		ui.Badge(c, row.Tag).Background(pal.hover).TextColor(pal.textMuted).FontSize(fsMicro)
 		meta := row.Time
 		if row.UseCount > 1 {
 			meta += fmt.Sprintf(" · 用过 %d 次", row.UseCount)
 		}
-		ui.Text(c, meta).FontSize(11).TextColor(th.TextMuted)
+		ui.Text(c, meta).FontSize(fsCaption).TextColor(th.TextMuted)
 		if row.CreatedAt != "" {
-			ui.Text(c, "· 创建 "+row.CreatedAt).FontSize(10).TextColor(th.TextMuted)
+			ui.Text(c, "· 创建 "+row.CreatedAt).FontSize(fsTiny).TextColor(th.TextMuted)
 		}
 		ui.Box(c).Grow(1)
 		mark := ""
@@ -646,7 +668,7 @@ func (a *App) previewHeader(c *ui.Context, row Row, th *ui.Theme) ui.Element {
 			mark += "🔒"
 		}
 		if mark != "" {
-			ui.Text(c, mark).FontSize(11).TextColor(th.Accent)
+			ui.Text(c, mark).FontSize(fsCaption).TextColor(th.Accent)
 		}
 	})
 	return head
@@ -679,13 +701,14 @@ func previewContentBudget(cardH float32) float32 {
 
 // previewImage 在固定高度的框里居中显示原图，尺寸字也在框内——高图不会压到下面的控件。
 func (a *App) previewImage(c *ui.Context, row Row, l panelLayout, th *ui.Theme) {
+	pal := colorsOf(c)
 	if row.OriginPath == "" {
-		ui.Text(c, "⚠️ 原图文件缺失").FontSize(11).TextColor(th.Warning)
+		ui.Text(c, "⚠️ 原图文件缺失").FontSize(fsCaption).TextColor(th.Warning)
 		return
 	}
 	b := bitmapFor(row.OriginPath)
 	if b == nil {
-		ui.Text(c, "⚠️ 原图读不出来（文件可能已被清理）").FontSize(11).TextColor(th.Warning)
+		ui.Text(c, "⚠️ 原图读不出来（文件可能已被清理）").FontSize(fsCaption).TextColor(th.Warning)
 		return
 	}
 	box := previewContentBudget(a.previewH)
@@ -695,7 +718,7 @@ func (a *App) previewImage(c *ui.Context, row Row, l panelLayout, th *ui.Theme) 
 
 	// 容器要有底色才进命中链（裸 Image 摸不到点击）；点它 = 看大图
 	shot := row
-	area := ui.Column(c).Height(box).Background(th.Surface).Radius(8).
+	area := ui.Column(c).Height(box).Background(pal.field).Radius(rCtl).
 		Justify(ui.Center).AlignItems(ui.Center).Gap(6).Cursor(ui.CursorPointer).
 		OnClick(func() { a.later(func() { a.ShowDetail(shot) }) })
 	a.imageRect = area.Bounds()
@@ -711,7 +734,7 @@ func (a *App) previewImage(c *ui.Context, row Row, l panelLayout, th *ui.Theme) 
 				pct = int(100 * w / float32(row.Width))
 			}
 			ui.Text(c, fmt.Sprintf("%d × %d · 显示 %d%% · 点击看大图", row.Width, row.Height, pct)).
-				FontSize(10).TextColor(th.TextMuted)
+				FontSize(fsTiny).TextColor(th.TextMuted)
 		}
 	})
 }
@@ -730,7 +753,7 @@ func (a *App) previewGroup(c *ui.Context, row Row, th *ui.Theme) {
 	}
 	choice := current
 	ui.Row(c).Fill().Height(28).Gap(8).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "分组").FontSize(11).TextColor(th.TextMuted).Width(40)
+		ui.Text(c, "分组").FontSize(fsCaption).TextColor(th.TextMuted).Width(40)
 		ui.Select(c, &choice, names).Grow(1)
 	})
 	if choice != current {

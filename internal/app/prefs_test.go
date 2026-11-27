@@ -236,7 +236,9 @@ func TestPrefsUpdateSourceSwitches(t *testing.T) {
 	a := newTestApp(t)
 	a.Settings.ReleaseSource = update.SourceGitee
 	a.Settings.ReleaseRepo = "null_593_5354/clipnest"
-	tt := ui.NewTester(a.PrefsView, 620, 720)
+	// 窗口开高一点：更新源在滚动区最末尾（卡片化之后在 720 高之外），
+	// 这里验的是「点下拉能切源」，不是「滚到哪能看见」
+	tt := ui.NewTester(a.PrefsView, 620, 1800)
 	tt.Frame()
 	tt.Frame()
 
