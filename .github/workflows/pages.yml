@@ -5,12 +5,15 @@
 #
 # 为什么不用 paths 过滤：站点里的版本号取自 mygo.json（跟着发版走），只改代码不发版时也该重渲染；
 # 每次全量重建成本约 30s，Pages 免费额度完全够。
+#
+# 为什么不按 tag 触发：`github-pages` environment 有 branch_policy（只允许 main 部署），
+# 打 tag 推上来那次会在 deploy 步骤失败；而且 cancel-in-progress 会把同一次发版的 main 那次取消掉。
+# 发版流程本来就先推 main 再打 tag，main 那次足够了。
 name: pages
 
 on:
   push:
     branches: [main]
-    tags: ['v*']
   workflow_dispatch:
 
 permissions:
