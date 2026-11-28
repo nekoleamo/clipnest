@@ -15,12 +15,20 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="page">
+<div class="page" id="top">
 
   <!-- ============ 顶栏：粘顶药丸 ============ -->
   <div class="nav-wrap">
     <nav class="nav" aria-label="主导航">
-      <a class="nav-brand" href="./"><span class="logo" aria-hidden="true">c</span><b>clipnest</b></a>
+      <a class="nav-brand" href="./"><span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="6.5" y="5.8" width="11" height="13.4" rx="1.9" fill="currentColor"/>
+          <rect x="9.6" y="4.6" width="4.8" height="2.2" rx="1.1" fill="currentColor"/>
+          <g class="ln">
+            <rect x="8.4" y="10.6" width="7.2" height="1.15" rx="0.58"/>
+            <rect x="8.4" y="12.9" width="4.9" height="1.15" rx="0.58"/>
+            <rect x="8.4" y="15.2" width="6.1" height="1.15" rx="0.58"/>
+          </g>
+        </svg></span><b>clipnest</b></a>
       <span class="tag">⌘⇧V</span>
       <span class="ver">v__CLIPNEST_VERSION__</span>
       <div class="nav-links">
@@ -484,6 +492,12 @@ mygo 自绘 · 无 WebView
     </div>
   </footer>
 
+  <a class="to-top" href="#top" aria-label="回到顶部">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M12 19V6M6 12l6-6 6 6"/>
+    </svg>
+  </a>
+
 </div>
 <script>
 // 复制按钮
@@ -497,6 +511,19 @@ document.querySelectorAll('[data-copy]').forEach(function (el) {
     });
   });
 });
+// 回到顶部：滚过一屏才出现（脚本只负责显隐，平滑滚动交给 CSS）
+(function () {
+  var el = document.querySelector('.to-top');
+  if (!el) return;
+  var shown = false;
+  function upd() {
+    var want = window.scrollY > 600;
+    if (want !== shown) { shown = want; el.classList.toggle('on', want); }
+  }
+  addEventListener('scroll', upd, { passive: true });
+  addEventListener('resize', upd);
+  upd();
+})();
 // 明暗切换：写 data-theme 并记住；没锁定时跟随系统
 (function () {
   var btn = document.querySelector('.theme-toggle');

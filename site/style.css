@@ -275,16 +275,17 @@ kbd {
 }
 
 .nav-brand { display: flex; align-items: center; gap: 8px; color: var(--near-black); flex: none; }
+/* 字标图标：与 app 图标同一族的剪贴板形（白板 + 夹子 + 三条内容线），
+   颜色走令牌，深色档自动跟着变；不用位图是为了不破「不加载第三方资源」与随时改色 */
 .nav-brand .logo {
   width: 28px; height: 28px;
   border-radius: 7px;
   background: var(--brand);
   color: var(--on-brand);
   display: grid; place-items: center;
-  font-family: var(--font-display);
-  font-size: 16px;
-  line-height: 1;
 }
+.nav-brand .logo svg { display: block; width: 25px; height: 25px; }
+.nav-brand .logo .ln { fill: var(--brand); }
 .nav-brand b { font-family: var(--font-display); font-size: 18px; font-weight: 500; letter-spacing: -0.02em; }
 
 .nav .tag {
@@ -384,7 +385,8 @@ kbd {
 }
 @media (max-width: 480px) {
   .nav { padding: 7px 10px; min-height: 0; }
-  .nav-brand .logo { width: 24px; height: 24px; font-size: 14px; }
+  .nav-brand .logo { width: 24px; height: 24px; }
+  .nav-brand .logo svg { width: 22px; height: 22px; }
   .nav-btn { padding: 0 12px; }
 }
 
@@ -1071,7 +1073,42 @@ section { margin-bottom: var(--section-gap); }
 }
 
 /* ============================================================
-   13. 动效与打印
+   13. 回到顶部：滚过一屏才出现，样式与药丸导航同族
+   用 <a href="#top">：平滑滚动走 html 已有的 scroll-behavior，
+   不需要脚本也能用（脚本只负责显隐），reduced-motion 下自然变直跳
+   ============================================================ */
+.to-top {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  /* 用 --field 而不是 --ivory：深色档页面底是 #0b0b0b、页脚带是 #151514，
+     ivory 停在页脚上会几乎看不见，而 --field 两档都与底下分得开 */
+  background: var(--field);
+  color: var(--stone);
+  box-shadow: var(--sh-card);
+  /* 默认不可见 = 也不进 tab 顺序（visibility 会把焦点拿掉） */
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(6px);
+  transition: opacity var(--t-card) var(--ease), transform var(--t-card) var(--ease),
+    color var(--t-fast), border-color var(--t-fast), visibility var(--t-card);
+}
+.to-top.on { opacity: 1; visibility: visible; transform: none; }
+.to-top:hover { color: var(--brand); border-color: var(--brand); }
+.to-top svg { display: block; width: 15px; height: 15px; }
+@media (max-width: 560px) {
+  .to-top { right: 16px; bottom: 16px; width: 38px; height: 38px; }
+}
+
+/* ============================================================
+   14. 动效与打印
    ============================================================ */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
@@ -1080,6 +1117,7 @@ section { margin-bottom: var(--section-gap); }
 
 @media print {
   .nav-wrap { position: static; }
+  .to-top { display: none; }
   .panel { box-shadow: none; break-inside: avoid; }
   .install, .frag, .en-card, .tree { background: none; }
   .foot { background: none; color: #333; margin: 0; padding: 24px 0; }
