@@ -6,290 +6,510 @@
 <title>clipnest — clipboard history for macOS and Windows, synced through your own NAS</title>
 <meta name="description" content="A clipboard history manager for macOS and Windows written in pure Go. A menubar panel opens with ⌘⇧V and pastes with ⏎. History stays in local SQLite; two machines sync through your own WebDAV NAS with end-to-end encryption.">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#fbfaf6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b0b0b" media="(prefers-color-scheme: dark)">
 <link rel="alternate" hreflang="zh-CN" href="../">
 <link rel="alternate" hreflang="en" href="./">
+<!-- settle the theme before the CSS paints, so a reload never flashes light first -->
+<script>try{var t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
 <link rel="stylesheet" href="../style.css">
 </head>
 <body>
-<main>
+<div class="page">
 
-<div class="top">
-  <span class="brand">clipnest<span class="tag">⌘⇧V</span></span>
-  <span class="ver">v__CLIPNEST_VERSION__</span>
-  <nav>
-    <a class="hide-sm" href="#why">Features</a>
-    <a class="hide-sm" href="#keys">Keys</a>
-    <a class="hide-sm" href="#sync">Sync</a>
-    <a href="#install">Install</a>
-    <a class="hide-xs" href="https://github.com/nekoleamo/clipnest">GitHub</a>
-    <a class="hide-xs" href="https://gitee.com/null_593_5354/clipnest">gitee</a>
-    <a class="lang" href="../" hreflang="zh-CN" aria-label="切换到中文">中</a>
-  </nav>
-</div>
-
-<header class="hero">
-  <span class="pill">Pure Go UI <b>·</b> no WebView, no Node <b>·</b> MIT</span>
-  <h1>Everything you copied,<br><em>right here</em></h1>
-  <p class="lede">
-    Clipboard history for <span class="tk">macOS</span> and <span class="tk">Windows</span>: it sits in the menubar, opens with one key, pastes on <kbd>⏎</kbd>.
-  </p>
-  <p class="lede lede-sub">
-    History stays in local SQLite. Two machines sync through <b>your own NAS</b> over WebDAV with end-to-end encryption.<br>
-    One pure-Go binary: no cloud account, nothing uploaded anywhere else.
-  </p>
-
-  <div class="cta">
-    <div class="install">
-      <div class="row">
-        <span class="os">macOS · Homebrew</span>
-        <button class="copy" type="button" data-copy="brew tap nekoleamo/clipnest &amp;&amp; brew trust --tap nekoleamo/clipnest &amp;&amp; brew install --cask clipnest" aria-label="Copy install command">Copy</button>
+  <!-- ============ nav: sticky pill ============ -->
+  <div class="nav-wrap">
+    <nav class="nav" aria-label="Main">
+      <a class="nav-brand" href="./"><span class="logo" aria-hidden="true">c</span><b>clipnest</b></a>
+      <span class="tag">⌘⇧V</span>
+      <span class="ver">v__CLIPNEST_VERSION__</span>
+      <div class="nav-links">
+        <a href="#why">Features</a>
+        <a href="#keys">Keys</a>
+        <a href="#sync">Sync</a>
+        <a href="#faq">Questions</a>
       </div>
-      <code>brew tap nekoleamo/clipnest &amp;&amp; brew install --cask clipnest</code>
-    </div>
-    <div class="install">
-      <div class="row">
-        <span class="os">macOS · script</span>
-        <button class="copy" type="button" data-copy="curl -fsSL https://gitee.com/null_593_5354/clipnest/raw/main/install.sh | sh" aria-label="Copy install command">Copy</button>
+      <div class="nav-actions">
+        <button class="theme-toggle" type="button" aria-pressed="false" aria-label="Toggle dark mode"></button>
+        <a class="lang" href="../" hreflang="zh-CN" aria-label="切换到中文">中</a>
+        <a class="nav-btn nav-btn--solid" href="#install">Install</a>
       </div>
-      <code>curl -fsSL https://gitee.com/null_593_5354/clipnest/raw/main/install.sh | sh</code>
-    </div>
-    <div class="install">
-      <div class="row">
-        <span class="os">Windows · Scoop</span>
-        <button class="copy" type="button" data-copy="scoop bucket add clipnest https://gitee.com/null_593_5354/scoop-clipnest&#10;scoop install clipnest" aria-label="Copy install command">Copy</button>
-      </div>
-      <code>scoop bucket add clipnest https://gitee.com/null_593_5354/scoop-clipnest<br>scoop install clipnest</code>
-    </div>
-    <div class="install">
-      <div class="row">
-        <span class="os">Windows · PowerShell</span>
-        <button class="copy" type="button" data-copy="irm https://gitee.com/null_593_5354/clipnest/raw/main/install.ps1 | iex" aria-label="Copy install command">Copy</button>
-      </div>
-      <code>irm https://gitee.com/null_593_5354/clipnest/raw/main/install.ps1 | iex</code>
-    </div>
-    <p class="fallback">The commands above use the Gitee mirror (much faster from mainland China). For GitHub, swap the domain for
-      <code>github.com/nekoleamo/clipnest/releases/latest/download</code>. Both scripts verify <code>SHA256SUMS</code> and abort without installing anything on mismatch.</p>
+    </nav>
   </div>
-</header>
 
-<div class="keycap" aria-hidden="true">
-  <kbd>⌘</kbd><kbd>⇧</kbd><kbd>V</kbd><span>whenever you need it</span>
-</div>
-
-<div class="panel" role="img" aria-label="The clipnest panel: search field, filter bar, history list with one command selected, right sidebar preview and note, shortcut hints at the bottom">
-  <div class="chrome" aria-hidden="true">
-    <div class="panel-top">
-      <div class="grip"></div>
-      <div class="search">Search clipboard history…<span class="caret"></span></div>
-      <div class="filters">
-        <span class="seg"><i class="on">All</i><i>Starred</i><i>Pinned</i><i>Images</i><i>Files</i><i>Sensitive</i></span>
-        <span class="count">312 items (40 loaded)</span>
+  <!-- ============ hero: text left, install blocks right ============ -->
+  <header class="hero hero-split">
+    <div>
+      <p class="hero-pill">Pure Go UI <b>·</b> no WebView, no Node <b>·</b> MIT</p>
+      <h1>Everything you copied,<br><em>right here</em></h1>
+      <p class="hero-stack">text<i>·</i>rich text<i>·</i>images<i>·</i>files<i>·</i>notes<i>·</i>groups</p>
+      <p class="lede">
+        Clipboard history for macOS and Windows: it sits in the menubar, opens with one key, pastes on <kbd>⏎</kbd>.
+        History stays in local SQLite; two machines sync through <b>your own NAS</b> over WebDAV with end-to-end encryption.
+      </p>
+      <p class="trust">
+        <span>Menubar</span><span>Two platforms</span><span>Single binary</span><span>No cloud</span><span>No telemetry</span>
+      </p>
+      <div class="hero-cta">
+        <a class="btn btn--primary" href="#install">How to install</a>
+        <a class="btn btn--ghost" href="https://github.com/nekoleamo/clipnest">Source on GitHub</a>
       </div>
     </div>
-    <div class="split">
-      <div class="list list-in">
-        <div class="row on"><span class="slot">⌘1</span><span class="tag">text</span><span class="sum">npm run build &amp;&amp; npm test -- --runInBand</span><span class="n">×4</span><span class="t">14:22</span></div>
-        <div class="row"><span class="slot">⌘2</span><span class="tag">image</span><span class="sum">Screen Shot 2026-11-19 at 14.05.33.png · 1440×900</span><span class="n">×2</span><span class="t">14:05</span></div>
-        <div class="row"><span class="slot">⌘3</span><span class="tag">html</span><span class="sum">📌 #dev clipnest README (rich text, with plain-text fallback)</span><span class="n">×9</span><span class="t">13:58</span></div>
-        <div class="row"><span class="slot">⌘4</span><span class="tag">files</span><span class="sum">📁 clipnest-1.3.5-universal.dmg (1 file)</span><span class="n"></span><span class="t">13:40</span></div>
-        <div class="row"><span class="slot">⌘5</span><span class="tag">text</span><span class="sum">★ git push origin main &amp;&amp; git push gitee main</span><span class="n">×2</span><span class="t">11:32</span></div>
-        <div class="row"><span class="slot">⌘6</span><span class="tag">text</span><span class="sum">ssh -L 8080:127.0.0.1:8080 nas.lan</span><span class="n">×6</span><span class="t">10:47</span></div>
-        <div class="row"><span class="slot">⌘7</span><span class="tag">text</span><span class="sum">🔒 #accounts op://vault/NAS/password (from the password manager)</span><span class="n">×3</span><span class="t">yesterday</span></div>
-        <div class="row"><span class="slot">⌘8</span><span class="tag">image</span><span class="sum">Screen Shot 2026-11-18 22.41.07.png · 2560×1440</span><span class="n"></span><span class="t">yesterday</span></div>
-        <div class="row"><span class="slot">⌘9</span><span class="tag">files</span><span class="sum">📝 ~/Documents/notes/memory-system.md</span><span class="n"></span><span class="t">yesterday</span></div>
+
+    <div>
+      <div class="install-grid">
+        <div class="install">
+          <div class="row"><span class="os">macOS · Homebrew</span>
+            <button class="copy" type="button" data-copy="brew tap nekoleamo/clipnest &amp;&amp; brew trust --tap nekoleamo/clipnest &amp;&amp; brew install --cask clipnest" aria-label="Copy install command">Copy</button>
+          </div>
+          <code>brew tap nekoleamo/clipnest &amp;&amp; brew install --cask clipnest</code>
+        </div>
+        <div class="install">
+          <div class="row"><span class="os">macOS · script</span>
+            <button class="copy" type="button" data-copy="curl -fsSL https://gitee.com/null_593_5354/clipnest/raw/main/install.sh | sh" aria-label="Copy install command">Copy</button>
+          </div>
+          <code>curl -fsSL https://gitee.com/null_593_5354/clipnest/raw/main/install.sh | sh</code>
+        </div>
+        <div class="install">
+          <div class="row"><span class="os">Windows · Scoop</span>
+            <button class="copy" type="button" data-copy="scoop bucket add clipnest https://gitee.com/null_593_5354/scoop-clipnest&#10;scoop install clipnest" aria-label="Copy install command">Copy</button>
+          </div>
+          <code>scoop bucket add clipnest https://gitee.com/null_593_5354/scoop-clipnest<br>scoop install clipnest</code>
+        </div>
+        <div class="install">
+          <div class="row"><span class="os">Windows · PowerShell</span>
+            <button class="copy" type="button" data-copy="irm https://gitee.com/null_593_5354/clipnest/raw/main/install.ps1 | iex" aria-label="Copy install command">Copy</button>
+          </div>
+          <code>irm https://gitee.com/null_593_5354/clipnest/raw/main/install.ps1 | iex</code>
+        </div>
       </div>
-      <div class="preview">
-        <div class="pv-head"><span class="badge">text</span><span>14:22 · used 4×</span></div>
-        <div class="pv-body">npm run build &amp;&amp; npm test -- --runInBand</div>
-        <div class="pv-rule"></div>
-        <div class="pv-row"><span>Group</span><span>#dev</span></div>
-        <div class="pv-row"><span>Note</span><span>0 / 500</span></div>
-        <div class="pv-note">Something to find it by later…</div>
-        <div class="pv-actions"><i>Copy</i><i>Export</i><span class="grow"></span><span class="keys">⌘Y / ⌘O</span></div>
+      <p class="fallback">The commands above use the Gitee mirror (much faster from mainland China). For GitHub, swap the domain for
+        <code>github.com/nekoleamo/clipnest/releases/latest/download</code>. Both scripts verify <code>SHA256SUMS</code> and abort without installing anything on mismatch.</p>
+    </div>
+  </header>
+
+  <!-- ============ panel mock (not a bitmap: it follows the theme) ============ -->
+  <div class="shot">
+    <div class="panel" role="img" aria-label="The clipnest panel: search field, filter bar, history list with one command selected, right sidebar preview and note, shortcut hints at the bottom">
+      <div aria-hidden="true">
+        <div class="panel-top">
+          <div class="grip"></div>
+          <div class="search">Search clipboard history…<span class="caret"></span></div>
+          <div class="filters">
+            <span class="seg"><i class="on">All</i><i>Starred</i><i>Pinned</i><i>Images</i><i>Files</i><i>Sensitive</i></span>
+            <span class="count">312 items (40 loaded)</span>
+          </div>
+        </div>
+        <div class="split">
+          <div class="list">
+            <div class="row on"><span class="slot">⌘1</span><span class="tag">text</span><span class="sum">npm run build &amp;&amp; npm test -- --runInBand</span><span class="n">×4</span><span class="t">14:22</span></div>
+            <div class="row"><span class="slot">⌘2</span><span class="tag">image</span><span class="sum">Screen Shot 2026-11-19 at 14.05.33.png · 1440×900</span><span class="n">×2</span><span class="t">14:05</span></div>
+            <div class="row"><span class="slot">⌘3</span><span class="tag">html</span><span class="sum">📌 #dev clipnest README (rich text, with plain-text fallback)</span><span class="n">×9</span><span class="t">13:58</span></div>
+            <div class="row"><span class="slot">⌘4</span><span class="tag">files</span><span class="sum">📁 clipnest-1.3.5-universal.dmg (1 file)</span><span class="n"></span><span class="t">13:40</span></div>
+            <div class="row"><span class="slot">⌘5</span><span class="tag">text</span><span class="sum">★ git push origin main &amp;&amp; git push gitee main</span><span class="n">×2</span><span class="t">11:32</span></div>
+            <div class="row"><span class="slot">⌘6</span><span class="tag">text</span><span class="sum">ssh -L 8080:127.0.0.1:8080 nas.lan</span><span class="n">×6</span><span class="t">10:47</span></div>
+            <div class="row"><span class="slot">⌘7</span><span class="tag">text</span><span class="sum">🔒 #accounts op://vault/NAS/password (from the password manager)</span><span class="n">×3</span><span class="t">yesterday</span></div>
+            <div class="row"><span class="slot">⌘8</span><span class="tag">image</span><span class="sum">Screen Shot 2026-11-18 22.41.07.png · 2560×1440</span><span class="n"></span><span class="t">yesterday</span></div>
+            <div class="row"><span class="slot">⌘9</span><span class="tag">files</span><span class="sum">📝 ~/Documents/notes/memory-system.md</span><span class="n"></span><span class="t">yesterday</span></div>
+          </div>
+          <div class="preview">
+            <div class="pv-head"><span class="badge">text</span><span>14:22 · used 4×</span></div>
+            <div class="pv-body">npm run build &amp;&amp; npm test -- --runInBand</div>
+            <div class="pv-rule"></div>
+            <div class="pv-row"><span>Group</span><span>#dev</span></div>
+            <div class="pv-row"><span>Note</span><span>0 / 500</span></div>
+            <div class="pv-note">Something to find it by later…</div>
+            <div class="pv-actions"><i>Copy</i><i>Export</i><span class="grow"></span><span class="keys">⌘Y / ⌘O</span></div>
+          </div>
+        </div>
+        <div class="panel-keys">1/312 · ⏎ paste · ⌥⏎ plain text · ⌘1-9 paste now · ⌘D delete · ⌘P pin · ⌘S star · ⌘E sensitive · ⌘O export · ⌘Y copy</div>
       </div>
     </div>
-    <div class="foot">1/312 · ⏎ paste · ⌥⏎ plain text · ⌘1-9 paste now · ⌘D delete · ⌘P pin · ⌘S star · ⌘E sensitive · ⌘O export · ⌘Y copy</div>
+    <div class="shot-caption">
+      <span class="title">Open, then paste</span>
+      <span class="line">⌘⇧V by default: the panel appears next to the cursor, takes the keyboard, ⏎ pastes back</span>
+    </div>
   </div>
-</div>
 
-<ul class="stats">
-  <li><b>2</b><span>platforms</span></li>
-  <li><b>0</b><span>cgo</span></li>
-  <li><b>1</b><span>binary</span></li>
-  <li><b>193</b><span>tests</span></li>
-  <li><b>0</b><span>third-party clouds</span></li>
-</ul>
+  <!-- ============ stats ============ -->
+  <ul class="stats">
+    <li><b>2</b><span>platforms</span></li>
+    <li><b>0</b><span>cgo</span></li>
+    <li><b>1</b><span>binary</span></li>
+    <li><b>193</b><span>tests</span></li>
+    <li><b>0</b><span>third-party clouds</span></li>
+  </ul>
 
-<section id="why">
-  <h2>What it solves</h2>
-  <dl>
-    <dt>Open and paste</dt>
-    <dd>The global shortcut is <kbd>⌘⇧V</kbd> (<kbd>Ctrl+Shift+V</kbd> on Windows). The panel pops up next to the cursor and takes the keyboard:
-      <kbd>⏎</kbd> pastes back into the app you came from, <kbd>⌘1-9</kbd> pastes one of the first nine, <kbd>⌥⏎</kbd> pastes plain text only, and a double click works too.
-      The shortcut is remappable: click once in settings and press the combination, no accelerator syntax to memorise.</dd>
-    <dt>Capture</dt>
-    <dd>Text, rich text (HTML, RTF), images and files. Deduplicated by <code>blake3</code> content hash with a use counter;
-      the paste clipnest itself writes back is suppressed by a guard, so nothing duplicates itself.</dd>
-    <dt>Search</dt>
-    <dd>SQLite FTS5 full text; <b>two-character queries fall back to <code>LIKE</code></b>, because a trigram index cannot match anything shorter than three characters.
-      Kind and group filters, an instant preview on the right, and paging that continues as you scroll.</dd>
-    <dt>Tidy up</dt>
-    <dd>Pin, star, note, group, mark sensitive. <kbd>⌘</kbd>-click several rows to delete in bulk, with a <b>10-second undo</b>.
-      None of these touch the sort timestamp (they write <code>meta_at</code> instead), so a sync never reshuffles the whole list because of them.</dd>
-    <dt>Sensitive apps</dt>
-    <dd>Filtered by <b>foreground app identity</b> (bundle id on macOS, process name on Windows) rather than by guessing content:
-      whatever you copy inside a password manager does not get stored by default.</dd>
-    <dt>Sync</dt>
-    <dd>WebDAV on your own NAS plus end-to-end encryption (argon2id + chacha20poly1305), so the server only ever holds ciphertext.
-      Pushes 1.2 s after a capture, switches between LAN and Tailscale addresses automatically, and <b>keeps every increment as its own file</b> for 7 days,
-      so a peer that was offline catches up in one round instead of losing the middle ones.</dd>
-    <dt>Backup</dt>
-    <dd><code>CNST1</code> encrypted containers, imported and exported with the same passphrase; clearing all history writes one first.</dd>
-    <dt>Small</dt>
-    <dd>Pure Go with <code>CGO_ENABLED=0</code>, the UI drawn by <a href="https://github.com/egoist/mygo">mygo</a>:
-      <b>no WebView, no Node, no Electron</b>. Data lives in <code>~/Library/Application Support/clipnest</code>
-      (<code>%APPDATA%\clipnest</code> on Windows).</dd>
-  </dl>
-</section>
+  <!-- ============ what it solves ============ -->
+  <section id="why">
+    <div class="section-head">
+      <h2 class="section-title">What it solves</h2>
+      <p class="section-lede">Eight things: the first six come up every day, the last two are why handing it your history is reasonable.</p>
+    </div>
 
-<section id="keys">
-  <h2>Keys <span class="hint">⌘ on macOS · Ctrl on Windows</span></h2>
-  <table>
-    <thead><tr><th>Key</th><th>Does</th></tr></thead>
-    <tbody>
-      <tr><td>⌘⇧V</td><td>Show / hide the panel (remappable to any combination, including F1–F12)</td></tr>
-      <tr><td>↑ ↓ ← →</td><td>Move the selection; <kbd>PgUp</kbd> / <kbd>PgDn</kbd> page, <kbd>Esc</kbd> hides (clears the marks first)</td></tr>
-      <tr><td>⏎</td><td>Paste into the previous app. With a Chinese IME, commit the candidate first and press again</td></tr>
-      <tr><td>⌘1-9</td><td>Paste that slot immediately; a modifier combo, so the IME never intercepts it</td></tr>
-      <tr><td>⌥⏎</td><td>Paste plain text only (rich text downgraded)</td></tr>
-      <tr><td>⌘F</td><td>Focus the search field (it is focused when the panel opens)</td></tr>
-      <tr><td>⌘D</td><td>Delete the selected row, or all marked rows (<kbd>⌘</kbd>-click marks)</td></tr>
-      <tr><td>⌘P / ⌘S / ⌘E</td><td>Pin / star / mark sensitive</td></tr>
-      <tr><td>⌘O / ⌘Y</td><td>Export to a file (it asks where) / copy back to the clipboard</td></tr>
-    </tbody>
-  </table>
-  <p class="after">Undo and select-all have no shortcuts: <kbd>⌘Z</kbd> and <kbd>⌘A</kbd> are swallowed by the search field,
-    so they are two visible buttons on the filter bar instead.</p>
-</section>
+    <div class="features">
 
-<section id="sync">
-  <h2>Connecting two machines <span class="hint">the NAS only holds ciphertext</span></h2>
-  <p class="lead">Fill this in once on each machine under Settings → Sync. <b>The two passphrases are not the same thing</b>, and each is stored in the system credential store:</p>
-  <table>
-    <thead><tr><th>Field</th><th>Stored as</th><th>Requirement</th></tr></thead>
-    <tbody>
-      <tr><td>WebDAV password</td><td>System credential store<br><code>clipnest-webdav/device-name</code></td><td>The NAS account password; it may differ per device</td></tr>
-      <tr><td>Encryption passphrase</td><td>System credential store<br><code>clipnest-sync/device-name</code></td><td>Shared by end-to-end encryption and backups; <b>both machines must use the same string</b>, or what you pull down cannot be decrypted</td></tr>
-    </tbody>
-  </table>
-  <div class="tree">/data/clipnest/
+      <article class="feature">
+        <div class="feature-media">
+          <div class="frag">
+            <span class="k">shortcut</span>
+            <span class="v">⌘⇧V → panel
+⏎ paste back
+<em>⌘1-9 paste a slot</em></span>
+          </div>
+        </div>
+        <div>
+          <h3 class="feature-name">Open and paste</h3>
+          <ul class="feature-points">
+            <li>The global shortcut is <kbd>⌘⇧V</kbd> (<kbd>Ctrl+Shift+V</kbd> on Windows). The panel pops up next to the cursor and takes the keyboard;
+              <kbd>⏎</kbd> pastes back into the app you came from, <kbd>⌥⏎</kbd> pastes plain text only, and a double click works too</li>
+            <li>The shortcut is remappable: click once in settings and press the combination, no accelerator syntax to memorise</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-media">
+          <div class="frag">
+            <span class="k">dedupe</span>
+            <span class="v">blake3("kind:content")
+text·rich·images·files
+<em>hit → use_count + 1</em></span>
+          </div>
+        </div>
+        <div>
+          <h3 class="feature-name">Capture and dedupe</h3>
+          <ul class="feature-points">
+            <li>Text, rich text (HTML, RTF), images and files, deduplicated by <code>blake3</code> content hash with a use counter</li>
+            <li>The paste clipnest itself writes back is suppressed by a guard, so nothing duplicates itself</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-media">
+          <div class="frag">
+            <span class="k">search</span>
+            <span class="v">FTS5 trigram index
+"deploy" → LIKE fallback
+<em>shorter than 3 chars</em></span>
+          </div>
+        </div>
+        <div>
+          <h3 class="feature-name">Search</h3>
+          <ul class="feature-points">
+            <li>SQLite FTS5 full text; <b>two-character queries fall back to <code>LIKE</code></b>, because a trigram index cannot match anything shorter than three characters</li>
+            <li>Kind and group filters, an instant preview on the right, and paging that continues as you scroll</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-media">
+          <div class="frag">
+            <span class="k">tidy</span>
+            <span class="v">⌘D delete → 10s undo
+pin / star / note / group
+<em>meta_at ≠ updated_at</em></span>
+          </div>
+        </div>
+        <div>
+          <h3 class="feature-name">Tidy up</h3>
+          <ul class="feature-points">
+            <li>Pin, star, note, group, mark sensitive; <kbd>⌘</kbd>-click several rows to delete in bulk, with a <b>10-second undo</b></li>
+            <li>None of these touch the sort timestamp (they write <code>meta_at</code> instead), so a sync never reshuffles the whole list because of them</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-media">
+          <div class="frag">
+            <span class="k">sensitive</span>
+            <span class="v">bundle id / process name
+password manager → skipped
+<em>content is never guessed</em></span>
+          </div>
+        </div>
+        <div>
+          <h3 class="feature-name">Sensitive apps</h3>
+          <ul class="feature-points">
+            <li>Filtered by <b>foreground app identity</b> (bundle id on macOS, process name on Windows) rather than by guessing content</li>
+            <li>Whatever you copy inside a password manager does not get stored by default</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-media">
+          <div class="frag">
+            <span class="k">sync</span>
+            <span class="v">argon2id + chacha20poly1305
+push 1.2 s after a capture
+<em>one file per increment</em></span>
+          </div>
+        </div>
+        <div>
+          <h3 class="feature-name">Sync</h3>
+          <ul class="feature-points">
+            <li>WebDAV on your own NAS plus end-to-end encryption, so the server only ever holds ciphertext</li>
+            <li>Switches between LAN and Tailscale addresses automatically, and <b>keeps every increment as its own file</b> for 7 days,
+              so a peer that was offline catches up in one round instead of losing the middle ones</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-media">
+          <div class="frag">
+            <span class="k">backup</span>
+            <span class="v">CNST1 container
+same passphrase as sync
+<em>written before a wipe</em></span>
+          </div>
+        </div>
+        <div>
+          <h3 class="feature-name">Backup</h3>
+          <ul class="feature-points">
+            <li><code>CNST1</code> encrypted containers, imported and exported with the same passphrase as sync encryption</li>
+            <li>Clearing all history writes one first</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-media">
+          <div class="frag">
+            <span class="k">stack</span>
+            <span class="v">CGO_ENABLED=0
+mygo drawing · no WebView
+<em>no Node · no Electron</em></span>
+          </div>
+        </div>
+        <div>
+          <h3 class="feature-name">Small</h3>
+          <ul class="feature-points">
+            <li>Pure Go with <code>CGO_ENABLED=0</code>, the UI drawn by <a href="https://github.com/egoist/mygo">mygo</a>:
+              <b>no WebView, no Node, no Electron</b></li>
+            <li>Data lives in <code>~/Library/Application Support/clipnest</code> (<code>%APPDATA%\clipnest</code> on Windows)</li>
+          </ul>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ============ keys ============ -->
+  <section id="keys">
+    <div class="section-head">
+      <h2 class="section-title">Keys</h2>
+      <p class="section-lede">⌘ on macOS, Ctrl on Windows; the search field already has focus when the panel opens.</p>
+    </div>
+    <table class="doctable">
+      <thead><tr><th>Key</th><th>Does</th></tr></thead>
+      <tbody>
+        <tr><td>⌘⇧V</td><td>Show / hide the panel (remappable to any combination, including F1–F12)</td></tr>
+        <tr><td>↑ ↓ ← →</td><td>Move the selection; <kbd>PgUp</kbd> / <kbd>PgDn</kbd> page, <kbd>Esc</kbd> hides (clears the marks first)</td></tr>
+        <tr><td>⏎</td><td>Paste into the previous app. With a Chinese IME, commit the candidate first and press again</td></tr>
+        <tr><td>⌘1-9</td><td>Paste that slot immediately; a modifier combo, so the IME never intercepts it</td></tr>
+        <tr><td>⌥⏎</td><td>Paste plain text only (rich text downgraded)</td></tr>
+        <tr><td>⌘F</td><td>Focus the search field (it is focused when the panel opens)</td></tr>
+        <tr><td>⌘D</td><td>Delete the selected row, or all marked rows (<kbd>⌘</kbd>-click marks)</td></tr>
+        <tr><td>⌘P / ⌘S / ⌘E</td><td>Pin / star / mark sensitive</td></tr>
+        <tr><td>⌘O / ⌘Y</td><td>Export to a file (it asks where) / copy back to the clipboard</td></tr>
+      </tbody>
+    </table>
+    <p class="after">Undo and select-all have no shortcuts: <kbd>⌘Z</kbd> and <kbd>⌘A</kbd> are swallowed by the search field,
+      so they are two visible buttons on the filter bar instead.</p>
+  </section>
+
+  <!-- ============ connecting two machines ============ -->
+  <section id="sync">
+    <div class="section-head">
+      <h2 class="section-title">Connecting two machines</h2>
+      <p class="section-lede">The NAS only holds ciphertext: content is encrypted before it leaves the machine.</p>
+    </div>
+    <p class="lead">Fill this in once on each machine under Settings → Sync. <b>The two passphrases are not the same thing</b>, and each is stored in the system credential store:</p>
+    <table class="doctable doctable--flex">
+      <thead><tr><th>Field</th><th>Stored as</th><th>Requirement</th></tr></thead>
+      <tbody>
+        <tr><td>WebDAV password</td><td>System credential store<br><code>clipnest-webdav/device-name</code></td><td>The NAS account password; it may differ per device</td></tr>
+        <tr><td>Encryption passphrase</td><td>System credential store<br><code>clipnest-sync/device-name</code></td><td>Shared by end-to-end encryption and backups; <b>both machines must use the same string</b>, or what you pull down cannot be decrypted</td></tr>
+      </tbody>
+    </table>
+    <div class="tree">/data/clipnest/
 ├── <b>mac-a-20261119T012345.678.json</b>   ← one file per increment, timestamped, never overwritten
 ├── <b>mac-b-20261119T013012.101.json</b>   ← same on Windows, each machine writes its own
 ├── mac-a.json / mac-b.json              ← the old 1.3.2 and earlier format (still readable)
 └── blobs/ab/abcdef…png                  ← image originals, named by content hash, shared</div>
-  <p class="after">The device names must differ, they are what separates the files. A fresh device has no export watermark yet,
-    so its first sync pushes the whole history and it gets everything the other machine had. If a peer is missing one increment later on,
-    <b>“Re-push the whole history…”</b> in settings clears the watermark and pushes everything again (idempotent: images go through a ledger and are not re-uploaded).
-    Errors are shown verbatim in the panel footer and in settings: <code>PROPFIND: 401</code> means a wrong WebDAV password,
-    <code>x509: certificate signed by unknown authority</code> means a self-signed certificate you did not allow.</p>
-</section>
+    <p class="after">The device names must differ, they are what separates the files. A fresh device has no export watermark yet,
+      so its first sync pushes the whole history and it gets everything the other machine had. If a peer is missing one increment later on,
+      <b>“Re-push the whole history…”</b> in settings clears the watermark and pushes everything again (idempotent: images go through a ledger and are not re-uploaded).
+      Errors are shown verbatim in the panel footer and in settings: <code>PROPFIND: 401</code> means a wrong WebDAV password,
+      <code>x509: certificate signed by unknown authority</code> means a self-signed certificate you did not allow.</p>
+  </section>
 
-<section id="install">
-  <h2>Install <span class="hint">macOS · Windows · four channels</span></h2>
-  <table>
-    <thead><tr><th>Platform</th><th>How</th><th>Verified by</th></tr></thead>
-    <tbody>
-      <tr>
-        <td>macOS<br><span class="hint">Homebrew</span></td>
-        <td><code>brew tap nekoleamo/clipnest &amp;&amp; brew install --cask clipnest</code><br>
-          China mirror tap:<br>
-          <code>brew tap null_593_5354/clipnest https://gitee.com/null_593_5354/homebrew-clipnest</code></td>
-        <td>sha256 in the cask</td>
-      </tr>
-      <tr>
-        <td>macOS<br><span class="hint">script</span></td>
-        <td><code>curl -fsSL https://gitee.com/null_593_5354/clipnest/raw/main/install.sh | sh</code><br>
-          GitHub: <code>github.com/nekoleamo/clipnest/releases/latest/download/install.sh</code></td>
-        <td><code>SHA256SUMS</code>, aborts on mismatch</td>
-      </tr>
-      <tr>
-        <td>Windows<br><span class="hint">Scoop</span></td>
-        <td><code>scoop bucket add clipnest https://gitee.com/null_593_5354/scoop-clipnest</code><br>
-          <code>scoop install clipnest</code></td>
-        <td>sha256 in the manifest</td>
-      </tr>
-      <tr>
-        <td>Windows<br><span class="hint">PowerShell</span></td>
-        <td><code>irm https://gitee.com/null_593_5354/clipnest/raw/main/install.ps1 | iex</code><br>
-          Installs to <code>%LOCALAPPDATA%\Programs\clipnest</code> with a Start-menu shortcut</td>
-        <td><code>SHA256SUMS</code>, aborts on mismatch</td>
-      </tr>
-    </tbody>
-  </table>
-  <p class="after">Script options (environment variables when piping): <code>--from github|gitee|auto</code> (default auto, Gitee first) ·
-    <code>--version vX.Y.Z</code> · <code>--dir DIR</code> · <code>--no-open</code>. The same scripts ship with every release.</p>
-  <p class="after"><b>Unsigned and not notarized</b> (there is no Apple Developer Program subscription): package managers and
-    <code>curl</code> / <code>irm</code> downloads carry no quarantine flag, so Gatekeeper and SmartScreen stay quiet. Only a zip downloaded
-    in a browser needs “right click → Open” or <code>xattr -dr com.apple.quarantine</code>. The in-app update check only reports, it never installs,
-    and the source can be Gitee, GitHub, either automatically, or a custom URL.</p>
-</section>
+  <!-- ============ install ============ -->
+  <section id="install">
+    <div class="section-head">
+      <h2 class="section-title">Install</h2>
+      <p class="section-lede">Two channels per platform; all four verify checksums and abort on mismatch.</p>
+    </div>
+    <table class="doctable doctable--flex">
+      <thead><tr><th>Platform</th><th>How</th><th>Verified by</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>macOS<br><span class="hint">Homebrew</span></td>
+          <td><code>brew tap nekoleamo/clipnest &amp;&amp; brew install --cask clipnest</code><br>
+            China mirror tap:<br>
+            <code>brew tap null_593_5354/clipnest https://gitee.com/null_593_5354/homebrew-clipnest</code></td>
+          <td>sha256 in the cask</td>
+        </tr>
+        <tr>
+          <td>macOS<br><span class="hint">script</span></td>
+          <td><code>curl -fsSL https://gitee.com/null_593_5354/clipnest/raw/main/install.sh | sh</code><br>
+            GitHub: <code>github.com/nekoleamo/clipnest/releases/latest/download/install.sh</code></td>
+          <td><code>SHA256SUMS</code>, aborts on mismatch</td>
+        </tr>
+        <tr>
+          <td>Windows<br><span class="hint">Scoop</span></td>
+          <td><code>scoop bucket add clipnest https://gitee.com/null_593_5354/scoop-clipnest</code><br>
+            <code>scoop install clipnest</code></td>
+          <td>sha256 in the manifest</td>
+        </tr>
+        <tr>
+          <td>Windows<br><span class="hint">PowerShell</span></td>
+          <td><code>irm https://gitee.com/null_593_5354/clipnest/raw/main/install.ps1 | iex</code><br>
+            Installs to <code>%LOCALAPPDATA%\Programs\clipnest</code> with a Start-menu shortcut</td>
+          <td><code>SHA256SUMS</code>, aborts on mismatch</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="after">Script options (environment variables when piping): <code>--from github|gitee|auto</code> (default auto, Gitee first) ·
+      <code>--version vX.Y.Z</code> · <code>--dir DIR</code> · <code>--no-open</code>. The same scripts ship with every release.</p>
+    <p class="after"><b>Unsigned and not notarized</b> (there is no Apple Developer Program subscription): package managers and
+      <code>curl</code> / <code>irm</code> downloads carry no quarantine flag, so Gatekeeper and SmartScreen stay quiet. Only a zip downloaded
+      in a browser needs “right click → Open” or <code>xattr -dr com.apple.quarantine</code>. The in-app update check only reports, it never installs,
+      and the source can be Gitee, GitHub, either automatically, or a custom URL.</p>
+  </section>
 
-<section id="faq">
-  <h2>Questions</h2>
-  <dl class="faq">
-    <dt>⏎ only copies, nothing gets pasted</dt>
-    <dd>Pasting is done by synthesising <code>⌘V</code> through the accessibility API. Without the grant the panel shows a hint bar with a
-      “Grant access” button that opens the right system pane. On macOS there is one more case: after switching from an ad-hoc signature to a
-      fixed self-signed identity, the old grant no longer matches, so run <code>tccutil reset Accessibility com.clipnest.app</code> and tick it again.</dd>
-    <dt>Where is my data, and how do I remove all of it?</dt>
-    <dd><code>~/Library/Application Support/clipnest</code> on macOS, <code>%APPDATA%\clipnest</code> on Windows: a <code>clipnest.db</code> (SQLite),
-      image shards and rotating logs. Delete that directory and the two credential entries and nothing is left elsewhere. Clearing history can also
-      be done inside the app, which asks you to type a confirmation word and writes an encrypted backup first.</dd>
-    <dt>Does syncing send my clipboard somewhere?</dt>
-    <dd>No. There is no cloud account and no telemetry. The target is the WebDAV directory you configure, and content is encrypted before it leaves
-      the machine, so the server only sees ciphertext. Passphrases live in the system keychain or credential manager.</dd>
-    <dt>Why not Electron or Tauri?</dt>
-    <dd>Clipboard monitoring, global shortcuts, files on the clipboard and moving a window across displays all exist in the framework layer.
-      Pure-Go drawing lets both platforms share one codebase, cross-compiles without an extra toolchain, and the binary needs no webview runtime.</dd>
-    <dt>Can I read the code?</dt>
-    <dd>Yes. MIT, <code>go test ./...</code> with 193 tests, and a pre-commit hook that runs vet, the tests and a Windows cross-compile.
-      The architecture and its 12 behavioural contracts are in <code>docs/路线图.md</code>.</dd>
-  </dl>
-</section>
+  <!-- ============ questions ============ -->
+  <section id="faq">
+    <div class="section-head">
+      <h2 class="section-title">Questions</h2>
+      <p class="section-lede">The four sections above cover most of it; these are the ones people keep asking.</p>
+    </div>
+    <div class="faq">
+      <details open>
+        <summary><h3>⏎ only copies, nothing gets pasted</h3><span class="chev"></span></summary>
+        <p class="answer">Pasting is done by synthesising <code>⌘V</code> through the accessibility API. Without the grant the panel shows a hint bar with a
+          “Grant access” button that opens the right system pane. On macOS there is one more case: after switching from an ad-hoc signature to a
+          fixed self-signed identity, the old grant no longer matches, so run <code>tccutil reset Accessibility com.clipnest.app</code> and tick it again.</p>
+      </details>
+      <details>
+        <summary><h3>Where is my data, and how do I remove all of it?</h3><span class="chev"></span></summary>
+        <p class="answer"><code>~/Library/Application Support/clipnest</code> on macOS, <code>%APPDATA%\clipnest</code> on Windows: a <code>clipnest.db</code> (SQLite),
+          image shards and rotating logs. Delete that directory and the two credential entries and nothing is left elsewhere. Clearing history can also
+          be done inside the app, which asks you to type a confirmation word and writes an encrypted backup first.</p>
+      </details>
+      <details>
+        <summary><h3>Does syncing send my clipboard somewhere?</h3><span class="chev"></span></summary>
+        <p class="answer">No. There is no cloud account and no telemetry. The target is the WebDAV directory you configure, and content is encrypted before it leaves
+          the machine, so the server only sees ciphertext. Passphrases live in the system keychain or credential manager.</p>
+      </details>
+      <details>
+        <summary><h3>Why not Electron or Tauri?</h3><span class="chev"></span></summary>
+        <p class="answer">Clipboard monitoring, global shortcuts, files on the clipboard and moving a window across displays all exist in the framework layer.
+          Pure-Go drawing lets both platforms share one codebase, cross-compiles without an extra toolchain, and the binary needs no webview runtime.</p>
+      </details>
+      <details>
+        <summary><h3>Can I read the code?</h3><span class="chev"></span></summary>
+        <p class="answer">Yes. MIT, <code>go test ./...</code> with 193 tests, and a pre-commit hook that runs vet, the tests and a Windows cross-compile.
+          The architecture and its 12 behavioural contracts are in <code>docs/路线图.md</code>.</p>
+      </details>
+    </div>
+  </section>
 
-<section class="en" lang="zh-CN">
-  <h2>中文摘要</h2>
-  <p>clipnest 是 macOS / Windows 的剪贴板历史管理器：菜单栏常驻，<code>⌘⇧V</code> 唤出，<code>⏎</code> 粘贴。文本、富文本、图片、文件都收，
-  按 blake3 内容哈希去重；历史存在本机 SQLite（FTS5），两台机器通过自有 NAS 的 WebDAV 同步并做端到端加密，服务端只有密文。
-  敏感应用按前台应用身份过滤，不猜内容。界面由 mygo 纯 Go 自绘，无 WebView、无 Node、无 cgo。MIT 开源。
-  <br>安装：<code>brew tap nekoleamo/clipnest &amp;&amp; brew install --cask clipnest</code>（Windows：<code>scoop install clipnest</code>），或安装一节里的一行脚本。</p>
-</section>
+  <!-- ============ Chinese summary ============ -->
+  <section>
+    <div class="en-card" lang="zh-CN">
+      <h2>中文摘要</h2>
+      <p>clipnest 是 macOS / Windows 的剪贴板历史管理器：菜单栏常驻，<code>⌘⇧V</code> 唤出，<code>⏎</code> 粘贴。文本、富文本、图片、文件都收，
+      按 blake3 内容哈希去重；历史存在本机 SQLite（FTS5），两台机器通过自有 NAS 的 WebDAV 同步并做端到端加密，服务端只有密文。
+      敏感应用按前台应用身份过滤，不猜内容。界面由 mygo 纯 Go 自绘，无 WebView、无 Node、无 cgo。MIT 开源。
+      <br>安装：<code>brew tap nekoleamo/clipnest &amp;&amp; brew install --cask clipnest</code>（Windows：<code>scoop install clipnest</code>），或安装一节里的一行脚本。</p>
+    </div>
+  </section>
 
-<footer>
-  <nav>
-    <a href="https://github.com/nekoleamo/clipnest">Source</a>
-    <a href="https://github.com/nekoleamo/clipnest/blob/main/docs/路线图.md">Roadmap</a>
-    <a href="https://github.com/nekoleamo/clipnest/blob/main/docs/发布.md">Release &amp; distribution</a>
-    <a href="https://github.com/nekoleamo/clipnest/blob/main/docs/windows-能力对照.md">Windows notes</a>
-    <a href="https://gitee.com/null_593_5354/clipnest">gitee mirror</a>
-    <a href="https://github.com/nekoleamo/clipnest/releases">Releases</a>
-  </nav>
-  <span class="fine">MIT · no analytics · no third-party assets</span>
-</footer>
+  <!-- ============ footer ============ -->
+  <footer class="foot">
+    <div class="foot-top">
+      <div class="mark">
+        <p class="name">clipnest</p>
+        <p>Clipboard history, synced through your own NAS</p>
+        <p>v__CLIPNEST_VERSION__ · MIT</p>
+      </div>
+      <nav class="foot-cols" aria-label="Footer">
+        <div class="foot-col">
+          <h4>Project</h4>
+          <a href="https://github.com/nekoleamo/clipnest">Source</a>
+          <a href="https://github.com/nekoleamo/clipnest/blob/main/docs/路线图.md">Roadmap and the 12 contracts</a>
+          <a href="https://github.com/nekoleamo/clipnest/blob/main/docs/变更记录.md">Changelog</a>
+        </div>
+        <div class="foot-col">
+          <h4>Releases</h4>
+          <a href="https://github.com/nekoleamo/clipnest/blob/main/docs/发布.md">Release &amp; distribution</a>
+          <a href="https://github.com/nekoleamo/clipnest/releases">Release artifacts</a>
+          <a href="https://github.com/nekoleamo/clipnest/tree/main/tools">Install scripts</a>
+        </div>
+        <div class="foot-col">
+          <h4>Platform</h4>
+          <a href="https://github.com/nekoleamo/clipnest/blob/main/docs/windows-能力对照.md">Windows notes</a>
+          <a href="https://gitee.com/null_593_5354/clipnest">gitee mirror</a>
+          <a href="https://gitee.com/null_593_5354/homebrew-clipnest">Homebrew tap</a>
+        </div>
+        <div class="foot-col">
+          <h4>License</h4>
+          <a href="https://github.com/nekoleamo/clipnest/blob/main/LICENSE">MIT</a>
+          <a href="https://github.com/nekoleamo/clipnest/blob/main/THIRD-PARTY-LICENSES.md">Third-party licenses</a>
+        </div>
+      </nav>
+    </div>
+    <div class="foot-bottom">
+      <p>MIT · <b>no analytics</b> · no third-party assets</p>
+      <p>Install scripts verify <b>SHA256SUMS</b> and abort on mismatch</p>
+    </div>
+  </footer>
 
-</main>
+</div>
 <script>
-(function(){
-  document.querySelectorAll('[data-copy]').forEach(function(el){
-    el.addEventListener('click',function(){
-      if(!navigator.clipboard)return;
-      if(!el.dataset.label)el.dataset.label=el.textContent;
-      navigator.clipboard.writeText(el.dataset.copy).then(function(){
-        el.textContent='Copied';el.classList.add('done');
-        setTimeout(function(){el.textContent=el.dataset.label;el.classList.remove('done');},1400);
-      });
+// copy buttons
+document.querySelectorAll('[data-copy]').forEach(function (el) {
+  el.addEventListener('click', function () {
+    if (!navigator.clipboard) return;
+    if (!el.dataset.label) el.dataset.label = el.textContent;
+    navigator.clipboard.writeText(el.dataset.copy).then(function () {
+      el.textContent = 'Copied'; el.classList.add('done');
+      setTimeout(function () { el.textContent = el.dataset.label; el.classList.remove('done'); }, 1400);
     });
   });
+});
+// theme: write data-theme and remember it; follow the system until locked
+(function () {
+  var btn = document.querySelector('.theme-toggle');
+  var root = document.documentElement;
+  var sysDark = matchMedia('(prefers-color-scheme: dark)');
+  function isDark() {
+    return root.dataset.theme ? root.dataset.theme === 'dark' : sysDark.matches;
+  }
+  function sync() { btn.setAttribute('aria-pressed', String(isDark())); }
+  btn.addEventListener('click', function () {
+    root.dataset.theme = isDark() ? 'light' : 'dark';
+    try { localStorage.setItem('theme', root.dataset.theme); } catch (e) {}
+    sync();
+  });
+  sync();
+  sysDark.addEventListener('change', sync);
 })();
 </script>
 </body>

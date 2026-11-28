@@ -19,7 +19,10 @@ go test ./...                  # 测试
 go vet ./...
 GOOS=windows go build ./...    # Windows 交叉编译（纯 Go，无需 xwin）
 go tool mygo build             # 打包（bundle / dmg / 安装包，需 mygo.config.ts）
+sh tools/build-site.sh         # 官网 → site/dist（只注入版本号，别手改 dist）
 ```
+
+官网自查：出的是 headless Chrome 截图。**它最小布局宽 500px** —— `--window-size=390` 也按 500 排版，截图看着像「右侧被裁」，其实不是溢出；验窄屏把 `480px` 断点临时改成 `520px` 再按 500 渲染，或读 `.page` 的 `scrollWidth`。看页面下半部分别裁图（`sips --cropOffset` 大偏移会静默返回整图），复制一份 dist 插 `<style>.hero-split,.shot,.stats{display:none}</style>` 直接跳到那一段。
 
 ## 目录规划
 

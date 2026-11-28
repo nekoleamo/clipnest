@@ -6,292 +6,513 @@
 <title>clipnest — 剪贴板历史管理器，同步走你自己的 NAS</title>
 <meta name="description" content="macOS / Windows 剪贴板历史管理器：菜单栏常驻，⌘⇧V 唤出，回车即粘。纯 Go 自绘、无 WebView；历史存在本机 SQLite，同步走自有 NAS 的 WebDAV 并端到端加密；敏感应用按身份过滤。MIT 开源。">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#fbfaf6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0b0b0b" media="(prefers-color-scheme: dark)">
 <link rel="alternate" hreflang="zh-CN" href="./">
 <link rel="alternate" hreflang="en" href="en/">
+<!-- 明暗档在样式之前定下来，避免刷新时先白后黑闪一下 -->
+<script>try{var t=localStorage.getItem('theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<main>
+<div class="page">
 
-<div class="top">
-  <span class="brand">clipnest<span class="tag">⌘⇧V</span></span>
-  <span class="ver">v__CLIPNEST_VERSION__</span>
-  <nav>
-    <a class="hide-sm" href="#why">功能</a>
-    <a class="hide-sm" href="#keys">快捷键</a>
-    <a class="hide-sm" href="#sync">同步</a>
-    <a href="#install">安装</a>
-    <a class="hide-xs" href="https://github.com/nekoleamo/clipnest">GitHub</a>
-    <a class="hide-xs" href="https://gitee.com/null_593_5354/clipnest">gitee</a>
-    <a class="lang" href="en/" hreflang="en" aria-label="Switch to English">EN</a>
-  </nav>
-</div>
-
-<header class="hero">
-  <span class="pill">纯 Go 自绘 <b>·</b> 无 WebView / 无 Node <b>·</b> MIT 开源</span>
-  <h1>复制过的，<br><em>都在这儿了</em></h1>
-  <p class="lede">
-    <span class="tk">macOS</span> · <span class="tk">Windows</span> 剪贴板历史管理器：菜单栏常驻，一按唤出，回车即粘。
-  </p>
-  <p class="lede lede-sub">
-    历史只在本机 SQLite · 两端同步走<b>你自己的 NAS</b>（WebDAV + 端到端加密）<br>
-    纯 Go 单二进制，不要云账号，不上传任何数据
-  </p>
-
-  <div class="cta">
-    <div class="install">
-      <div class="row">
-        <span class="os">macOS · Homebrew</span>
-        <button class="copy" type="button" data-copy="brew tap nekoleamo/clipnest &amp;&amp; brew trust --tap nekoleamo/clipnest &amp;&amp; brew install --cask clipnest" aria-label="复制安装命令">复制</button>
+  <!-- ============ 顶栏：粘顶药丸 ============ -->
+  <div class="nav-wrap">
+    <nav class="nav" aria-label="主导航">
+      <a class="nav-brand" href="./"><span class="logo" aria-hidden="true">c</span><b>clipnest</b></a>
+      <span class="tag">⌘⇧V</span>
+      <span class="ver">v__CLIPNEST_VERSION__</span>
+      <div class="nav-links">
+        <a href="#why">功能</a>
+        <a href="#keys">快捷键</a>
+        <a href="#sync">同步</a>
+        <a href="#faq">常见问题</a>
       </div>
-      <code>brew tap nekoleamo/clipnest &amp;&amp; brew install --cask clipnest</code>
-    </div>
-    <div class="install">
-      <div class="row">
-        <span class="os">macOS · 一键脚本</span>
-        <button class="copy" type="button" data-copy="curl -fsSL https://gitee.com/null_593_5354/clipnest/raw/main/install.sh | sh" aria-label="复制安装命令">复制</button>
+      <div class="nav-actions">
+        <button class="theme-toggle" type="button" aria-pressed="false" aria-label="切换深色"></button>
+        <a class="lang" href="en/" hreflang="en" aria-label="Switch to English">EN</a>
+        <a class="nav-btn nav-btn--solid" href="#install">安装</a>
       </div>
-      <code>curl -fsSL https://gitee.com/null_593_5354/clipnest/raw/main/install.sh | sh</code>
-    </div>
-    <div class="install">
-      <div class="row">
-        <span class="os">Windows · Scoop</span>
-        <button class="copy" type="button" data-copy="scoop bucket add clipnest https://gitee.com/null_593_5354/scoop-clipnest&#10;scoop install clipnest" aria-label="复制安装命令">复制</button>
-      </div>
-      <code>scoop bucket add clipnest https://gitee.com/null_593_5354/scoop-clipnest<br>scoop install clipnest</code>
-    </div>
-    <div class="install">
-      <div class="row">
-        <span class="os">Windows · PowerShell</span>
-        <button class="copy" type="button" data-copy="irm https://gitee.com/null_593_5354/clipnest/raw/main/install.ps1 | iex" aria-label="复制安装命令">复制</button>
-      </div>
-      <code>irm https://gitee.com/null_593_5354/clipnest/raw/main/install.ps1 | iex</code>
-    </div>
-    <p class="fallback">上面是 Gitee 源（国内快）。GitHub 源把域名换成
-      <code>github.com/nekoleamo/clipnest/releases/latest/download</code> 即可。
-      两个脚本装完都核 <code>SHA256SUMS</code>，不符就中止、什么都不装。</p>
+    </nav>
   </div>
-</header>
 
-<div class="keycap" aria-hidden="true">
-  <kbd>⌘</kbd><kbd>⇧</kbd><kbd>V</kbd><span>任何时候按一下</span>
-</div>
-
-<div class="panel" role="img" aria-label="clipnest 面板示意：搜索框、筛选条、历史列表（选中一条命令）、右侧栏预览与备注、底部快捷键提示">
-  <div class="chrome" aria-hidden="true">
-    <div class="panel-top">
-      <div class="grip"></div>
-      <div class="search">搜索剪贴板历史…<span class="caret"></span></div>
-      <div class="filters">
-        <span class="seg"><i class="on">全部</i><i>收藏</i><i>置顶</i><i>图片</i><i>文件</i><i>敏感</i></span>
-        <span class="count">共 312 条（已加载 40）</span>
+  <!-- ============ Hero：左排版 + 右安装块 ============ -->
+  <header class="hero hero-split">
+    <div>
+      <p class="hero-pill">纯 Go 自绘 <b>·</b> 无 WebView / 无 Node <b>·</b> MIT 开源</p>
+      <h1>复制过的，<br><em>都在这儿了</em></h1>
+      <p class="hero-stack">文本<i>·</i>富文本<i>·</i>图片<i>·</i>文件<i>·</i>备注<i>·</i>分组</p>
+      <p class="lede">
+        菜单栏常驻的剪贴板历史管理器：一按唤出，回车即粘。历史只在本机 SQLite，
+        两端同步走<b>你自己的 NAS</b>（WebDAV + 端到端加密）。
+      </p>
+      <p class="trust">
+        <span>菜单栏常驻</span><span>双平台</span><span>单二进制</span><span>无云账号</span><span>无遥测</span>
+      </p>
+      <div class="hero-cta">
+        <a class="btn btn--primary" href="#install">看安装方式</a>
+        <a class="btn btn--ghost" href="https://github.com/nekoleamo/clipnest">GitHub 源码</a>
       </div>
     </div>
-    <div class="split">
-      <div class="list list-in">
-        <div class="row on"><span class="slot">⌘1</span><span class="tag">文本</span><span class="sum">npm run build &amp;&amp; npm test -- --runInBand</span><span class="n">×4</span><span class="t">14:22</span></div>
-        <div class="row"><span class="slot">⌘2</span><span class="tag">图片</span><span class="sum">Screen Shot 2026-11-19 at 14.05.33.png · 1440×900</span><span class="n">×2</span><span class="t">14:05</span></div>
-        <div class="row"><span class="slot">⌘3</span><span class="tag">HTML</span><span class="sum">📌 #开发 clipnest README（富文本，同时带纯文本兜底）</span><span class="n">×9</span><span class="t">13:58</span></div>
-        <div class="row"><span class="slot">⌘4</span><span class="tag">文件</span><span class="sum">📁 clipnest-1.3.5-universal.dmg（1 个文件）</span><span class="n"></span><span class="t">13:40</span></div>
-        <div class="row"><span class="slot">⌘5</span><span class="tag">文本</span><span class="sum">★ git push origin main &amp;&amp; git push gitee main</span><span class="n">×2</span><span class="t">11:32</span></div>
-        <div class="row"><span class="slot">⌘6</span><span class="tag">文本</span><span class="sum">ssh -L 8080:127.0.0.1:8080 nas.lan</span><span class="n">×6</span><span class="t">10:47</span></div>
-        <div class="row"><span class="slot">⌘7</span><span class="tag">文本</span><span class="sum">🔒 #账号 op://vault/NAS/密码（复制自密码管理器，已标敏感）</span><span class="n">×3</span><span class="t">昨天</span></div>
-        <div class="row"><span class="slot">⌘8</span><span class="tag">图片</span><span class="sum">截屏 2026-11-18 22.41.07.png · 2560×1440</span><span class="n"></span><span class="t">昨天</span></div>
-        <div class="row"><span class="slot">⌘9</span><span class="tag">文件</span><span class="sum">📝 ~/Documents/Plan/04-记忆系统/…</span><span class="n"></span><span class="t">昨天</span></div>
+
+    <div>
+      <div class="install-grid">
+        <div class="install">
+          <div class="row"><span class="os">macOS · Homebrew</span>
+            <button class="copy" type="button" data-copy="brew tap nekoleamo/clipnest &amp;&amp; brew trust --tap nekoleamo/clipnest &amp;&amp; brew install --cask clipnest" aria-label="复制安装命令">复制</button>
+          </div>
+          <code>brew tap nekoleamo/clipnest &amp;&amp; brew install --cask clipnest</code>
+        </div>
+        <div class="install">
+          <div class="row"><span class="os">macOS · 一键脚本</span>
+            <button class="copy" type="button" data-copy="curl -fsSL https://gitee.com/null_593_5354/clipnest/raw/main/install.sh | sh" aria-label="复制安装命令">复制</button>
+          </div>
+          <code>curl -fsSL https://gitee.com/null_593_5354/clipnest/raw/main/install.sh | sh</code>
+        </div>
+        <div class="install">
+          <div class="row"><span class="os">Windows · Scoop</span>
+            <button class="copy" type="button" data-copy="scoop bucket add clipnest https://gitee.com/null_593_5354/scoop-clipnest&#10;scoop install clipnest" aria-label="复制安装命令">复制</button>
+          </div>
+          <code>scoop bucket add clipnest https://gitee.com/null_593_5354/scoop-clipnest<br>scoop install clipnest</code>
+        </div>
+        <div class="install">
+          <div class="row"><span class="os">Windows · PowerShell</span>
+            <button class="copy" type="button" data-copy="irm https://gitee.com/null_593_5354/clipnest/raw/main/install.ps1 | iex" aria-label="复制安装命令">复制</button>
+          </div>
+          <code>irm https://gitee.com/null_593_5354/clipnest/raw/main/install.ps1 | iex</code>
+        </div>
       </div>
-      <div class="preview">
-        <div class="pv-head"><span class="badge">文本</span><span>14:22 · 用过 4 次</span></div>
-        <div class="pv-body">npm run build &amp;&amp; npm test -- --runInBand</div>
-        <div class="pv-rule"></div>
-        <div class="pv-row"><span>分组</span><span>#开发</span></div>
-        <div class="pv-row"><span>备注</span><span>0 / 500</span></div>
-        <div class="pv-note">写点什么，比如这条以后怎么找…</div>
-        <div class="pv-actions"><i>复制</i><i>导出</i><span class="grow"></span><span class="keys">⌘Y / ⌘O</span></div>
+      <p class="fallback">上面是 Gitee 源（国内快）。GitHub 源把域名换成
+        <code>github.com/nekoleamo/clipnest/releases/latest/download</code> 即可。
+        两个脚本装完都核 <code>SHA256SUMS</code>，不符就中止、什么都不装。</p>
+    </div>
+  </header>
+
+  <!-- ============ 面板示意图（不是位图：跟着明暗档与配色一起变） ============ -->
+  <div class="shot">
+    <div class="panel" role="img" aria-label="clipnest 面板示意：搜索框、筛选条、历史列表（选中一条命令）、右侧栏预览与备注、底部快捷键提示">
+      <div aria-hidden="true">
+        <div class="panel-top">
+          <div class="grip"></div>
+          <div class="search">搜索剪贴板历史…<span class="caret"></span></div>
+          <div class="filters">
+            <span class="seg"><i class="on">全部</i><i>收藏</i><i>置顶</i><i>图片</i><i>文件</i><i>敏感</i></span>
+            <span class="count">共 312 条（已加载 40）</span>
+          </div>
+        </div>
+        <div class="split">
+          <div class="list">
+            <div class="row on"><span class="slot">⌘1</span><span class="tag">文本</span><span class="sum">npm run build &amp;&amp; npm test -- --runInBand</span><span class="n">×4</span><span class="t">14:22</span></div>
+            <div class="row"><span class="slot">⌘2</span><span class="tag">图片</span><span class="sum">Screen Shot 2026-11-19 at 14.05.33.png · 1440×900</span><span class="n">×2</span><span class="t">14:05</span></div>
+            <div class="row"><span class="slot">⌘3</span><span class="tag">HTML</span><span class="sum">📌 #开发 clipnest README（富文本，同时带纯文本兜底）</span><span class="n">×9</span><span class="t">13:58</span></div>
+            <div class="row"><span class="slot">⌘4</span><span class="tag">文件</span><span class="sum">📁 clipnest-1.3.5-universal.dmg（1 个文件）</span><span class="n"></span><span class="t">13:40</span></div>
+            <div class="row"><span class="slot">⌘5</span><span class="tag">文本</span><span class="sum">★ git push origin main &amp;&amp; git push gitee main</span><span class="n">×2</span><span class="t">11:32</span></div>
+            <div class="row"><span class="slot">⌘6</span><span class="tag">文本</span><span class="sum">ssh -L 8080:127.0.0.1:8080 nas.lan</span><span class="n">×6</span><span class="t">10:47</span></div>
+            <div class="row"><span class="slot">⌘7</span><span class="tag">文本</span><span class="sum">🔒 #账号 op://vault/NAS/密码（复制自密码管理器，已标敏感）</span><span class="n">×3</span><span class="t">昨天</span></div>
+            <div class="row"><span class="slot">⌘8</span><span class="tag">图片</span><span class="sum">截屏 2026-11-18 22.41.07.png · 2560×1440</span><span class="n"></span><span class="t">昨天</span></div>
+            <div class="row"><span class="slot">⌘9</span><span class="tag">文件</span><span class="sum">📝 ~/Documents/Plan/04-记忆系统/…</span><span class="n"></span><span class="t">昨天</span></div>
+          </div>
+          <div class="preview">
+            <div class="pv-head"><span class="badge">文本</span><span>14:22 · 用过 4 次</span></div>
+            <div class="pv-body">npm run build &amp;&amp; npm test -- --runInBand</div>
+            <div class="pv-rule"></div>
+            <div class="pv-row"><span>分组</span><span>#开发</span></div>
+            <div class="pv-row"><span>备注</span><span>0 / 500</span></div>
+            <div class="pv-note">写点什么，比如这条以后怎么找…</div>
+            <div class="pv-actions"><i>复制</i><i>导出</i><span class="grow"></span><span class="keys">⌘Y / ⌘O</span></div>
+          </div>
+        </div>
+        <div class="panel-keys">1/312 · ⏎ 粘贴 · ⌥⏎ 纯文本 · ⌘1-9 直贴 · ⌘D 删 · ⌘P 置顶 · ⌘S 收藏 · ⌘E 敏感 · ⌘O 导出 · ⌘Y 复制</div>
       </div>
     </div>
-    <div class="foot">1/312 · ⏎ 粘贴 · ⌥⏎ 纯文本 · ⌘1-9 直贴 · ⌘D 删 · ⌘P 置顶 · ⌘S 收藏 · ⌘E 敏感 · ⌘O 导出 · ⌘Y 复制</div>
+    <div class="shot-caption">
+      <span class="title">唤出即用</span>
+      <span class="line">默认 ⌘⇧V：面板在鼠标附近弹出并抢到键盘，⏎ 粘回原应用</span>
+    </div>
   </div>
-</div>
 
-<ul class="stats">
-  <li><b>2</b><span>平台</span></li>
-  <li><b>0</b><span>cgo</span></li>
-  <li><b>1</b><span>个二进制</span></li>
-  <li><b>193</b><span>项测试</span></li>
-  <li><b>0</b><span>第三方云</span></li>
-</ul>
+  <!-- ============ 数字条 ============ -->
+  <ul class="stats">
+    <li><b>2</b><span>平台</span></li>
+    <li><b>0</b><span>cgo</span></li>
+    <li><b>1</b><span>个二进制</span></li>
+    <li><b>193</b><span>项测试</span></li>
+    <li><b>0</b><span>第三方云</span></li>
+  </ul>
 
-<section id="why">
-  <h2>它解决什么</h2>
-  <dl>
-    <dt>唤出即粘</dt>
-    <dd>全局快捷键默认 <kbd>⌘⇧V</kbd>（Windows <kbd>Ctrl+Shift+V</kbd>），面板在鼠标附近弹出并抢到键盘；
-      <kbd>⏎</kbd> 粘回原应用，<kbd>⌘1-9</kbd> 直贴前九条，<kbd>⌥⏎</kbd> 只粘纯文本，双击行也行。
-      快捷键可改：设置窗里点一下、直接在键盘上按组合键，不用记 accelerator 语法。</dd>
-    <dt>采集</dt>
-    <dd>文本 / 富文本（HTML、RTF）/ 图片 / 文件都收，按 <code>blake3</code> 内容哈希去重并累计使用次数；
-      自己写回的粘贴被 guard 抑制，不会凭空多出一条。</dd>
-    <dt>搜索</dt>
-    <dd>SQLite FTS5 全文检索；<b>两个汉字的短词自动降级 <code>LIKE</code></b>（trigram 索引吃不下短于 3 字符的词）。
-      类型与分组筛选、右侧即时预览、滚到底自动续页，几千条也不卡。</dd>
-    <dt>整理</dt>
-    <dd>置顶 / 收藏 / 备注 / 分组 / 敏感标记；<kbd>⌘</kbd> 点多选批量删，删完 <b>10 秒内可撤销</b>。
-      这些改动<b>不刷新排序时间</b>（另记 <code>meta_at</code>），同步不会因为它们把整张列表重排一遍。</dd>
-    <dt>敏感</dt>
-    <dd>按<b>前台应用身份</b>过滤（macOS bundle id / Windows 进程名），不猜内容：密码管理器里复制的东西默认不落库。</dd>
-    <dt>同步</dt>
-    <dd>自有 NAS 的 WebDAV + 端到端加密（argon2id + chacha20poly1305），NAS 上只有密文。
-      采集后 1.2 秒实时推送；局域网与 Tailscale 双地址自动切换；<b>对端离线期间每轮一包都留着</b>（本机保留 7 天），
-      回来一次补全，不丢中间几轮。</dd>
-    <dt>备份</dt>
-    <dd><code>CNST1</code> 加密容器导入导出，口令与同步加密口令同一把；清空全部历史前自动先导一份。</dd>
-    <dt>轻量</dt>
-    <dd>纯 Go，<code>CGO_ENABLED=0</code>；界面用 <a href="https://github.com/egoist/mygo">mygo</a> 自绘，
-      <b>无 WebView、无 Node、无 Electron</b>。数据在 <code>~/Library/Application Support/clipnest</code>
-      （Windows <code>%APPDATA%\clipnest</code>）。</dd>
-  </dl>
-</section>
+  <!-- ============ 它解决什么 ============ -->
+  <section id="why">
+    <div class="section-head">
+      <h2 class="section-title">它解决什么</h2>
+      <p class="section-lede">八件事：前六件是每天都会碰到的，后两件是敢把历史交给它的前提。</p>
+    </div>
 
-<section id="keys">
-  <h2>快捷键 <span class="hint">macOS 用 ⌘ · Windows 用 Ctrl</span></h2>
-  <table>
-    <thead><tr><th>按键</th><th>做什么</th></tr></thead>
-    <tbody>
-      <tr><td>⌘⇧V</td><td>唤出 / 收起面板（可在设置窗录成任意组合，含 F1–F12）</td></tr>
-      <tr><td>↑ ↓ ← →</td><td>选择；<kbd>PgUp</kbd> / <kbd>PgDn</kbd> 翻页，<kbd>Esc</kbd> 收起（有勾选时先取消勾选）</td></tr>
-      <tr><td>⏎</td><td>粘贴回原应用。中文输入法下要先提交候选再按一次（不输入时一次就粘）</td></tr>
-      <tr><td>⌘1-9</td><td>直贴对应序号；带修饰键，不受输入法影响</td></tr>
-      <tr><td>⌥⏎</td><td>只粘纯文本（富文本降级）</td></tr>
-      <tr><td>⌘F</td><td>焦点回到搜索框（面板刚唤出时本来就在）</td></tr>
-      <tr><td>⌘D</td><td>删当前条；有勾选时删勾选的那些（<kbd>⌘</kbd> 点行 = 勾选）</td></tr>
-      <tr><td>⌘P / ⌘S / ⌘E</td><td>置顶 / 收藏 / 敏感标记</td></tr>
-      <tr><td>⌘O / ⌘Y</td><td>导出到文件（先问存哪）/ 复制回剪贴板</td></tr>
-    </tbody>
-  </table>
-  <p class="after">撤销删除与全选没有快捷键：<kbd>⌘Z</kbd> / <kbd>⌘A</kbd> 在搜索框里会被输入框吃掉，
-    所以它们是筛选栏上两个看得见的按钮。</p>
-</section>
+    <div class="features">
 
-<section id="sync">
-  <h2>两端怎么连 <span class="hint">NAS 上只存密文</span></h2>
-  <p class="lead">设置 → 同步里各填一次。<b>两个口令不是一回事</b>，分别存进系统凭据：</p>
-  <table>
-    <thead><tr><th>填哪</th><th>存成</th><th>要求</th></tr></thead>
-    <tbody>
-      <tr><td>WebDAV 账号口令</td><td>系统凭据里<br><code>clipnest-webdav/本机名称</code></td><td>NAS 上那个账号的密码，各设备可以不同</td></tr>
-      <tr><td>加密口令</td><td>系统凭据里<br><code>clipnest-sync/本机名称</code></td><td>端到端加密与备份共用；<b>两台机器必须同一个字符串</b>，否则拉下来解不开</td></tr>
-    </tbody>
-  </table>
-  <div class="tree">/data/clipnest/
+      <article class="feature">
+        <div class="feature-media">
+          <div class="frag">
+            <span class="k">shortcut</span>
+            <span class="v">⌘⇧V → 面板
+⏎ 粘回原应用
+<em>⌘1-9 直贴前九条</em></span>
+          </div>
+        </div>
+        <div>
+          <h3 class="feature-name">唤出即粘</h3>
+          <ul class="feature-points">
+            <li>全局快捷键默认 <kbd>⌘⇧V</kbd>（Windows <kbd>Ctrl+Shift+V</kbd>），面板在鼠标附近弹出并抢到键盘；
+              <kbd>⏎</kbd> 粘回原应用，<kbd>⌥⏎</kbd> 只粘纯文本，双击行也行</li>
+            <li>快捷键可改：设置窗里点一下、直接在键盘上按组合键，不用记 accelerator 语法</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-media">
+          <div class="frag">
+            <span class="k">dedupe</span>
+            <span class="v">blake3("kind:content")
+文本·富文本·图片·文件
+<em>命中只 use_count+1</em></span>
+          </div>
+        </div>
+        <div>
+          <h3 class="feature-name">采集与去重</h3>
+          <ul class="feature-points">
+            <li>文本 / 富文本（HTML、RTF）/ 图片 / 文件都收，按 <code>blake3</code> 内容哈希去重并累计使用次数</li>
+            <li>自己写回的粘贴被 guard 抑制，不会凭空多出一条</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-media">
+          <div class="frag">
+            <span class="k">search</span>
+            <span class="v">FTS5 trigram 索引
+"部署" → 降级 LIKE
+<em>短于 3 字符吃不下</em></span>
+          </div>
+        </div>
+        <div>
+          <h3 class="feature-name">搜索</h3>
+          <ul class="feature-points">
+            <li>SQLite FTS5 全文检索；<b>两个汉字的短词自动降级 <code>LIKE</code></b>，否则命中不了</li>
+            <li>类型与分组筛选、右侧即时预览、滚到底自动续页，几千条也不卡</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-media">
+          <div class="frag">
+            <span class="k">tidy</span>
+            <span class="v">⌘D 删 → 10 秒撤销
+置顶 / 收藏 / 备注 / 分组
+<em>meta_at ≠ updated_at</em></span>
+          </div>
+        </div>
+        <div>
+          <h3 class="feature-name">整理</h3>
+          <ul class="feature-points">
+            <li>置顶 / 收藏 / 备注 / 分组 / 敏感标记；<kbd>⌘</kbd> 点多选批量删，删完 <b>10 秒内可撤销</b></li>
+            <li>这些改动<b>不刷新排序时间</b>（另记 <code>meta_at</code>），同步不会因为它们把整张列表重排一遍</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-media">
+          <div class="frag">
+            <span class="k">sensitive</span>
+            <span class="v">bundle id / 进程名
+密码管理器 → 不落库
+<em>不猜内容</em></span>
+          </div>
+        </div>
+        <div>
+          <h3 class="feature-name">敏感</h3>
+          <ul class="feature-points">
+            <li>按<b>前台应用身份</b>过滤（macOS bundle id / Windows 进程名），不猜内容</li>
+            <li>密码管理器里复制的东西默认不落库</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-media">
+          <div class="frag">
+            <span class="k">sync</span>
+            <span class="v">argon2id + chacha20poly1305
+采集后 1.2 秒推送
+<em>离线期间每轮留一包</em></span>
+          </div>
+        </div>
+        <div>
+          <h3 class="feature-name">同步</h3>
+          <ul class="feature-points">
+            <li>自有 NAS 的 WebDAV + 端到端加密，NAS 上只有密文</li>
+            <li>局域网与 Tailscale 双地址自动切换；<b>对端离线期间每轮一包都留着</b>（本机保留 7 天），
+              回来一次补全，不丢中间几轮</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-media">
+          <div class="frag">
+            <span class="k">backup</span>
+            <span class="v">CNST1 加密容器
+口令 = 同步加密口令
+<em>清空前自动先导一份</em></span>
+          </div>
+        </div>
+        <div>
+          <h3 class="feature-name">备份</h3>
+          <ul class="feature-points">
+            <li><code>CNST1</code> 加密容器导入导出，口令与同步加密口令同一把</li>
+            <li>清空全部历史前自动先导一份</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="feature">
+        <div class="feature-media">
+          <div class="frag">
+            <span class="k">stack</span>
+            <span class="v">CGO_ENABLED=0
+mygo 自绘 · 无 WebView
+<em>无 Node · 无 Electron</em></span>
+          </div>
+        </div>
+        <div>
+          <h3 class="feature-name">轻量</h3>
+          <ul class="feature-points">
+            <li>纯 Go，<code>CGO_ENABLED=0</code>；界面用 <a href="https://github.com/egoist/mygo">mygo</a> 自绘，
+              <b>无 WebView、无 Node、无 Electron</b></li>
+            <li>数据在 <code>~/Library/Application Support/clipnest</code>（Windows <code>%APPDATA%\clipnest</code>）</li>
+          </ul>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <!-- ============ 快捷键 ============ -->
+  <section id="keys">
+    <div class="section-head">
+      <h2 class="section-title">快捷键</h2>
+      <p class="section-lede">macOS 用 ⌘ · Windows 用 Ctrl；面板唤出时焦点本来就在搜索框里。</p>
+    </div>
+    <table class="doctable">
+      <thead><tr><th>按键</th><th>做什么</th></tr></thead>
+      <tbody>
+        <tr><td>⌘⇧V</td><td>唤出 / 收起面板（可在设置窗录成任意组合，含 F1–F12）</td></tr>
+        <tr><td>↑ ↓ ← →</td><td>选择；<kbd>PgUp</kbd> / <kbd>PgDn</kbd> 翻页，<kbd>Esc</kbd> 收起（有勾选时先取消勾选）</td></tr>
+        <tr><td>⏎</td><td>粘贴回原应用。中文输入法下要先提交候选再按一次（不输入时一次就粘）</td></tr>
+        <tr><td>⌘1-9</td><td>直贴对应序号；带修饰键，不受输入法影响</td></tr>
+        <tr><td>⌥⏎</td><td>只粘纯文本（富文本降级）</td></tr>
+        <tr><td>⌘F</td><td>焦点回到搜索框（面板刚唤出时本来就在）</td></tr>
+        <tr><td>⌘D</td><td>删当前条；有勾选时删勾选的那些（<kbd>⌘</kbd> 点行 = 勾选）</td></tr>
+        <tr><td>⌘P / ⌘S / ⌘E</td><td>置顶 / 收藏 / 敏感标记</td></tr>
+        <tr><td>⌘O / ⌘Y</td><td>导出到文件（先问存哪）/ 复制回剪贴板</td></tr>
+      </tbody>
+    </table>
+    <p class="after">撤销删除与全选没有快捷键：<kbd>⌘Z</kbd> / <kbd>⌘A</kbd> 在搜索框里会被输入框吃掉，
+      所以它们是筛选栏上两个看得见的按钮。</p>
+  </section>
+
+  <!-- ============ 两端怎么连 ============ -->
+  <section id="sync">
+    <div class="section-head">
+      <h2 class="section-title">两端怎么连</h2>
+      <p class="section-lede">NAS 上只存密文：内容在本地加密完才上传，服务端拿到的是不透明包。</p>
+    </div>
+    <p class="lead">设置 → 同步里各填一次。<b>两个口令不是一回事</b>，分别存进系统凭据：</p>
+    <table class="doctable doctable--flex">
+      <thead><tr><th>填哪</th><th>存成</th><th>要求</th></tr></thead>
+      <tbody>
+        <tr><td>WebDAV 账号口令</td><td>系统凭据里<br><code>clipnest-webdav/本机名称</code></td><td>NAS 上那个账号的密码，各设备可以不同</td></tr>
+        <tr><td>加密口令</td><td>系统凭据里<br><code>clipnest-sync/本机名称</code></td><td>端到端加密与备份共用；<b>两台机器必须同一个字符串</b>，否则拉下来解不开</td></tr>
+      </tbody>
+    </table>
+    <div class="tree">/data/clipnest/
 ├── <b>mac-a-20261119T012345.678.json</b>   ← 每轮增量一包，名字带时刻，互不覆盖
 ├── <b>mac-b-20261119T013012.101.json</b>   ← Windows 同理，各写自己的包
 ├── mac-a.json / mac-b.json              ← 1.3.2 及更早的旧格式（还能读）
 └── blobs/ab/abcdef…png                  ← 图片原图，按内容哈希命名，两台共用一份</div>
-  <p class="after">本机名称两台必须不同：文件名按它区分，填成一样会互相覆盖。
-    新设备第一次同步没有水位，会整段全量推一遍，能一次拿到对方全部历史；之后若对端漏了某一包，
-    用设置窗的「<b>重新推送全部历史…</b>」清水位重推（幂等，图片走台账不会重传）。
-    报错原文直接写在面板底栏与设置窗：<code>PROPFIND: 401</code> 是 WebDAV 口令不对，
-    <code>x509: certificate signed by unknown authority</code> 是自签证书没勾。</p>
-</section>
+    <p class="after">本机名称两台必须不同：文件名按它区分，填成一样会互相覆盖。
+      新设备第一次同步没有水位，会整段全量推一遍，能一次拿到对方全部历史；之后若对端漏了某一包，
+      用设置窗的「<b>重新推送全部历史…</b>」清水位重推（幂等，图片走台账不会重传）。
+      报错原文直接写在面板底栏与设置窗：<code>PROPFIND: 401</code> 是 WebDAV 口令不对，
+      <code>x509: certificate signed by unknown authority</code> 是自签证书没勾。</p>
+  </section>
 
-<section id="install">
-  <h2>安装 <span class="hint">macOS · Windows · 四个渠道</span></h2>
-  <table>
-    <thead><tr><th>平台</th><th>怎么装</th><th>校验</th></tr></thead>
-    <tbody>
-      <tr>
-        <td>macOS<br><span class="hint">Homebrew</span></td>
-        <td><code>brew tap nekoleamo/clipnest &amp;&amp; brew install --cask clipnest</code><br>
-          国内走 Gitee 镜像 tap：<br>
-          <code>brew tap null_593_5354/clipnest https://gitee.com/null_593_5354/homebrew-clipnest</code></td>
-        <td>cask 清单里的 sha256</td>
-      </tr>
-      <tr>
-        <td>macOS<br><span class="hint">一键脚本</span></td>
-        <td><code>curl -fsSL https://gitee.com/null_593_5354/clipnest/raw/main/install.sh | sh</code><br>
-          GitHub 源换成 <code>github.com/nekoleamo/clipnest/releases/latest/download/install.sh</code></td>
-        <td>先比 <code>SHA256SUMS</code>，不符即中止</td>
-      </tr>
-      <tr>
-        <td>Windows<br><span class="hint">Scoop</span></td>
-        <td><code>scoop bucket add clipnest https://gitee.com/null_593_5354/scoop-clipnest</code><br>
-          <code>scoop install clipnest</code></td>
-        <td>manifest 里的 sha256</td>
-      </tr>
-      <tr>
-        <td>Windows<br><span class="hint">PowerShell</span></td>
-        <td><code>irm https://gitee.com/null_593_5354/clipnest/raw/main/install.ps1 | iex</code><br>
-          装到 <code>%LOCALAPPDATA%\Programs\clipnest</code>，并建开始菜单快捷方式</td>
-        <td>先比 <code>SHA256SUMS</code>，不符即中止</td>
-      </tr>
-    </tbody>
-  </table>
-  <p class="after">一键脚本的参数（管道执行时用环境变量）：<code>--from github|gitee|auto</code>（默认 auto，先 Gitee）·
-    <code>--version vX.Y.Z</code> · <code>--dir DIR</code> · <code>--no-open</code>。同一个脚本也随每个 Release 发布。</p>
-  <p class="after"><b>没有签名与公证</b>（不买 Apple Developer Program）：包管理器与 <code>curl</code> / <code>irm</code>
-    下载不带隔离标记，不会触发 Gatekeeper / SmartScreen；只有浏览器直下 zip 才要「右键 → 打开」或
-    <code>xattr -dr com.apple.quarantine</code>。应用内「检查更新」只查不装，源可选 Gitee / GitHub / 自动 / 自定义。</p>
-</section>
+  <!-- ============ 安装 ============ -->
+  <section id="install">
+    <div class="section-head">
+      <h2 class="section-title">安装</h2>
+      <p class="section-lede">macOS 与 Windows 各两个渠道，四个都核摘要，不符即中止。</p>
+    </div>
+    <table class="doctable doctable--flex">
+      <thead><tr><th>平台</th><th>怎么装</th><th>校验</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>macOS<br><span class="hint">Homebrew</span></td>
+          <td><code>brew tap nekoleamo/clipnest &amp;&amp; brew install --cask clipnest</code><br>
+            国内走 Gitee 镜像 tap：<br>
+            <code>brew tap null_593_5354/clipnest https://gitee.com/null_593_5354/homebrew-clipnest</code></td>
+          <td>cask 清单里的 sha256</td>
+        </tr>
+        <tr>
+          <td>macOS<br><span class="hint">一键脚本</span></td>
+          <td><code>curl -fsSL https://gitee.com/null_593_5354/clipnest/raw/main/install.sh | sh</code><br>
+            GitHub 源换成 <code>github.com/nekoleamo/clipnest/releases/latest/download/install.sh</code></td>
+          <td>先比 <code>SHA256SUMS</code>，不符即中止</td>
+        </tr>
+        <tr>
+          <td>Windows<br><span class="hint">Scoop</span></td>
+          <td><code>scoop bucket add clipnest https://gitee.com/null_593_5354/scoop-clipnest</code><br>
+            <code>scoop install clipnest</code></td>
+          <td>manifest 里的 sha256</td>
+        </tr>
+        <tr>
+          <td>Windows<br><span class="hint">PowerShell</span></td>
+          <td><code>irm https://gitee.com/null_593_5354/clipnest/raw/main/install.ps1 | iex</code><br>
+            装到 <code>%LOCALAPPDATA%\Programs\clipnest</code>，并建开始菜单快捷方式</td>
+          <td>先比 <code>SHA256SUMS</code>，不符即中止</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="after">一键脚本的参数（管道执行时用环境变量）：<code>--from github|gitee|auto</code>（默认 auto，先 Gitee）·
+      <code>--version vX.Y.Z</code> · <code>--dir DIR</code> · <code>--no-open</code>。同一个脚本也随每个 Release 发布。</p>
+    <p class="after"><b>没有签名与公证</b>（不买 Apple Developer Program）：包管理器与 <code>curl</code> / <code>irm</code>
+      下载不带隔离标记，不会触发 Gatekeeper / SmartScreen；只有浏览器直下 zip 才要「右键 → 打开」或
+      <code>xattr -dr com.apple.quarantine</code>。应用内「检查更新」只查不装，源可选 Gitee / GitHub / 自动 / 自定义。</p>
+  </section>
 
-<section id="faq">
-  <h2>常见问题</h2>
-  <dl class="faq">
-    <dt>回车没反应，只复制了？</dt>
-    <dd>粘贴是靠辅助功能合成 <code>⌘V</code> 做的。没授权时面板顶部有条提示，点「去授权」直达系统设置。
-      macOS 上另有一种情形：从 ad-hoc 签名换到固定自签身份后旧授权会匹配不上，
-      <code>tccutil reset Accessibility com.clipnest.app</code> 再勾一次就好。</dd>
-    <dt>数据放在哪，怎么彻底删掉？</dt>
-    <dd>macOS <code>~/Library/Application Support/clipnest</code>，Windows <code>%APPDATA%\clipnest</code>：
-      里面是 <code>clipnest.db</code>（SQLite）、图片分片、自动轮转的日志。删掉这个目录、再到系统凭据里删掉那两条口令即可，不写别处。
-      清空历史可以只在应用内做（要输入确认词，且清空前自动先导一份加密备份）。</dd>
-    <dt>同步会不会把剪贴板传到别处？</dt>
-    <dd>不会。没有云端账号、没有遥测；目标就是你填的那个 WebDAV 目录，内容在本地加密后才上传，服务端只有密文。
-      口令存在系统钥匙串 / 凭据管理器里。</dd>
-    <dt>为什么不用 Electron / Tauri？</dt>
-    <dd>剪贴板监听、全局快捷键、文件进剪贴板、多屏挪窗这些框架层都现成；纯 Go 自绘让两端共用一套代码，
-      交叉编译不需要额外工具链，产物也没有 webview 运行时依赖。</dd>
-    <dt>能自己改吗？</dt>
-    <dd>能。MIT，<code>go test ./...</code> 193 项，提交前钩子跑 vet + test + Windows 交叉编译。
-      架构与 12 条行为契约在仓库的 <code>docs/路线图.md</code>。</dd>
-  </dl>
-</section>
+  <!-- ============ 常见问题 ============ -->
+  <section id="faq">
+    <div class="section-head">
+      <h2 class="section-title">常见问题</h2>
+      <p class="section-lede">上面前四节基本都说到了；剩下这几条是最常被追问的。</p>
+    </div>
+    <div class="faq">
+      <details open>
+        <summary><h3>回车没反应，只复制了？</h3><span class="chev"></span></summary>
+        <p class="answer">粘贴是靠辅助功能合成 <code>⌘V</code> 做的。没授权时面板顶部有条提示，点「去授权」直达系统设置。
+          macOS 上另有一种情形：从 ad-hoc 签名换到固定自签身份后旧授权会匹配不上，
+          <code>tccutil reset Accessibility com.clipnest.app</code> 再勾一次就好。</p>
+      </details>
+      <details>
+        <summary><h3>数据放在哪，怎么彻底删掉？</h3><span class="chev"></span></summary>
+        <p class="answer">macOS <code>~/Library/Application Support/clipnest</code>，Windows <code>%APPDATA%\clipnest</code>：
+          里面是 <code>clipnest.db</code>（SQLite）、图片分片、自动轮转的日志。删掉这个目录、再到系统凭据里删掉那两条口令即可，不写别处。
+          清空历史可以只在应用内做（要输入确认词，且清空前自动先导一份加密备份）。</p>
+      </details>
+      <details>
+        <summary><h3>同步会不会把剪贴板传到别处？</h3><span class="chev"></span></summary>
+        <p class="answer">不会。没有云端账号、没有遥测；目标就是你填的那个 WebDAV 目录，内容在本地加密后才上传，服务端只有密文。
+          口令存在系统钥匙串 / 凭据管理器里。</p>
+      </details>
+      <details>
+        <summary><h3>为什么不用 Electron / Tauri？</h3><span class="chev"></span></summary>
+        <p class="answer">剪贴板监听、全局快捷键、文件进剪贴板、多屏挪窗这些框架层都现成；纯 Go 自绘让两端共用一套代码，
+          交叉编译不需要额外工具链，产物也没有 webview 运行时依赖。</p>
+      </details>
+      <details>
+        <summary><h3>能自己改吗？</h3><span class="chev"></span></summary>
+        <p class="answer">能。MIT，<code>go test ./...</code> 193 项，提交前钩子跑 vet + test + Windows 交叉编译。
+          架构与 12 条行为契约在仓库的 <code>docs/路线图.md</code>。</p>
+      </details>
+    </div>
+  </section>
 
-<section class="en" lang="en">
-  <h2>In English</h2>
-  <p>clipnest is a clipboard history manager for macOS and Windows written in pure Go: a menubar-resident panel opens with
-  <code>⌘⇧V</code> and pastes with <code>⏎</code>. Text, rich text, images and files are collected and deduplicated by blake3 content
-  hash; history lives in a local SQLite (FTS5) database; two machines sync through your own WebDAV NAS with end-to-end
-  encryption (argon2id + chacha20poly1305), so the server only ever holds ciphertext. Sensitive apps are filtered by
-  foreground app identity, not by guessing content. The UI is drawn by mygo, so there is no WebView, no Node and no cgo.
-  <br>Install: <code>brew tap nekoleamo/clipnest &amp;&amp; brew install --cask clipnest</code> (Windows: <code>scoop install clipnest</code>),
-  or the one-line scripts in the install section. MIT licensed.</p>
-</section>
+  <!-- ============ 英文摘要 ============ -->
+  <section>
+    <div class="en-card" lang="en">
+      <h2>In English</h2>
+      <p>clipnest is a clipboard history manager for macOS and Windows written in pure Go: a menubar-resident panel opens with
+      <code>⌘⇧V</code> and pastes with <code>⏎</code>. Text, rich text, images and files are collected and deduplicated by blake3 content
+      hash; history lives in a local SQLite (FTS5) database; two machines sync through your own WebDAV NAS with end-to-end
+      encryption (argon2id + chacha20poly1305), so the server only ever holds ciphertext. Sensitive apps are filtered by
+      foreground app identity, not by guessing content. The UI is drawn by mygo, so there is no WebView, no Node and no cgo.
+      <br>Install: <code>brew tap nekoleamo/clipnest &amp;&amp; brew install --cask clipnest</code> (Windows: <code>scoop install clipnest</code>),
+      or the one-line scripts in the install section. MIT licensed.</p>
+    </div>
+  </section>
 
-<footer>
-  <nav>
-    <a href="https://github.com/nekoleamo/clipnest">源码</a>
-    <a href="https://github.com/nekoleamo/clipnest/blob/main/docs/路线图.md">路线图</a>
-    <a href="https://github.com/nekoleamo/clipnest/blob/main/docs/发布.md">发布与分发</a>
-    <a href="https://github.com/nekoleamo/clipnest/blob/main/docs/windows-能力对照.md">Windows 侧说明</a>
-    <a href="https://gitee.com/null_593_5354/clipnest">gitee 镜像</a>
-    <a href="https://github.com/nekoleamo/clipnest/releases">发布产物</a>
-  </nav>
-  <span class="fine">MIT · 不采集访问统计 · 不加载任何第三方资源</span>
-</footer>
+  <!-- ============ 页脚 ============ -->
+  <footer class="foot">
+    <div class="foot-top">
+      <div class="mark">
+        <p class="name">clipnest</p>
+        <p>剪贴板历史管理器，同步走你自己的 NAS</p>
+        <p>v__CLIPNEST_VERSION__ · MIT</p>
+      </div>
+      <nav class="foot-cols" aria-label="页脚导航">
+        <div class="foot-col">
+          <h4>项目</h4>
+          <a href="https://github.com/nekoleamo/clipnest">源码</a>
+          <a href="https://github.com/nekoleamo/clipnest/blob/main/docs/路线图.md">路线图与 12 条契约</a>
+          <a href="https://github.com/nekoleamo/clipnest/blob/main/docs/变更记录.md">变更记录</a>
+        </div>
+        <div class="foot-col">
+          <h4>发布</h4>
+          <a href="https://github.com/nekoleamo/clipnest/blob/main/docs/发布.md">发布与分发</a>
+          <a href="https://github.com/nekoleamo/clipnest/releases">发布产物</a>
+          <a href="https://github.com/nekoleamo/clipnest/tree/main/tools">安装脚本</a>
+        </div>
+        <div class="foot-col">
+          <h4>平台</h4>
+          <a href="https://github.com/nekoleamo/clipnest/blob/main/docs/windows-能力对照.md">Windows 侧说明</a>
+          <a href="https://gitee.com/null_593_5354/clipnest">gitee 镜像</a>
+          <a href="https://gitee.com/null_593_5354/homebrew-clipnest">Homebrew tap</a>
+        </div>
+        <div class="foot-col">
+          <h4>许可</h4>
+          <a href="https://github.com/nekoleamo/clipnest/blob/main/LICENSE">MIT</a>
+          <a href="https://github.com/nekoleamo/clipnest/blob/main/THIRD-PARTY-LICENSES.md">第三方许可</a>
+        </div>
+      </nav>
+    </div>
+    <div class="foot-bottom">
+      <p>MIT · <b>不采集访问统计</b> · 不加载任何第三方资源</p>
+      <p>安装脚本先核 <b>SHA256SUMS</b>，不符即中止</p>
+    </div>
+  </footer>
 
-</main>
+</div>
 <script>
-(function(){
-  document.querySelectorAll('[data-copy]').forEach(function(el){
-    el.addEventListener('click',function(){
-      if(!navigator.clipboard)return;
-      if(!el.dataset.label)el.dataset.label=el.textContent;
-      navigator.clipboard.writeText(el.dataset.copy).then(function(){
-        el.textContent='已复制';el.classList.add('done');
-        setTimeout(function(){el.textContent=el.dataset.label;el.classList.remove('done');},1400);
-      });
+// 复制按钮
+document.querySelectorAll('[data-copy]').forEach(function (el) {
+  el.addEventListener('click', function () {
+    if (!navigator.clipboard) return;
+    if (!el.dataset.label) el.dataset.label = el.textContent;
+    navigator.clipboard.writeText(el.dataset.copy).then(function () {
+      el.textContent = '已复制'; el.classList.add('done');
+      setTimeout(function () { el.textContent = el.dataset.label; el.classList.remove('done'); }, 1400);
     });
   });
+});
+// 明暗切换：写 data-theme 并记住；没锁定时跟随系统
+(function () {
+  var btn = document.querySelector('.theme-toggle');
+  var root = document.documentElement;
+  var sysDark = matchMedia('(prefers-color-scheme: dark)');
+  function isDark() {
+    return root.dataset.theme ? root.dataset.theme === 'dark' : sysDark.matches;
+  }
+  function sync() { btn.setAttribute('aria-pressed', String(isDark())); }
+  btn.addEventListener('click', function () {
+    root.dataset.theme = isDark() ? 'light' : 'dark';
+    try { localStorage.setItem('theme', root.dataset.theme); } catch (e) {}
+    sync();
+  });
+  sync();
+  sysDark.addEventListener('change', sync);
 })();
 </script>
 </body>
