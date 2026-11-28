@@ -1073,38 +1073,53 @@ section { margin-bottom: var(--section-gap); }
 }
 
 /* ============================================================
-   13. 回到顶部：滚过一屏才出现，样式与药丸导航同族
-   用 <a href="#top">：平滑滚动走 html 已有的 scroll-behavior，
-   不需要脚本也能用（脚本只负责显隐），reduced-motion 下自然变直跳
+   13. 回到顶部：右下角悬浮药丸（照 packnest 站点那一份）
+   ------------------------------------------------------------
+   显示/隐藏靠 `visibility` 而不是 `display`：不可见时它也不进 Tab 序，
+   但仍然能做淡入淡出（`[hidden]` / `display:none` 会把过渡一起吃掉）。
+   触发阈值在 JS 里（滚过首屏约九成），这里只管样子。
+   与 packnest 的一处不同：底色用 `--field` 而非 `--ivory` —— 本项目深色档的
+   页脚带也是 #151514，正好与 `--ivory` 同色，按钮停在页脚上会看不见。
    ============================================================ */
 .to-top {
   position: fixed;
   right: 24px;
   bottom: 24px;
   z-index: 70;
-  display: grid;
-  place-items: center;
-  width: 42px;
-  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 15px 0 13px;
   border: 1px solid var(--line);
   border-radius: var(--r-pill);
-  /* 用 --field 而不是 --ivory：深色档页面底是 #0b0b0b、页脚带是 #151514，
-     ivory 停在页脚上会几乎看不见，而 --field 两档都与底下分得开 */
   background: var(--field);
-  color: var(--stone);
-  box-shadow: var(--sh-card);
-  /* 默认不可见 = 也不进 tab 顺序（visibility 会把焦点拿掉） */
-  opacity: 0;
+  box-shadow: var(--sh-nav);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--text-control);
+  line-height: 1;
+  cursor: pointer;
+  /* 默认态：淡出 + 下沉，且不可聚焦 */
   visibility: hidden;
-  transform: translateY(6px);
-  transition: opacity var(--t-card) var(--ease), transform var(--t-card) var(--ease),
-    color var(--t-fast), border-color var(--t-fast), visibility var(--t-card);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity var(--t-fast) ease, transform var(--t-fast) ease,
+    visibility 0s linear var(--t-fast), border-color var(--t-fast), color var(--t-fast);
 }
-.to-top.on { opacity: 1; visibility: visible; transform: none; }
-.to-top:hover { color: var(--brand); border-color: var(--brand); }
-.to-top svg { display: block; width: 15px; height: 15px; }
-@media (max-width: 560px) {
-  .to-top { right: 16px; bottom: 16px; width: 38px; height: 38px; }
+.to-top.is-on {
+  visibility: visible;
+  opacity: 1;
+  transform: none;
+  transition-delay: 0s;
+}
+.to-top:hover { border-color: var(--brand); color: var(--brand); }
+.to-top svg { flex: none; }
+
+@media (max-width: 480px) {
+  /* 手机上正文跑满整宽，带字的药丸会盖住两行字 → 收成纯图标圆按钮 */
+  .to-top { right: 14px; bottom: 14px; width: 38px; height: 38px; padding: 0; justify-content: center; }
+  .to-top span { display: none; }
 }
 
 /* ============================================================

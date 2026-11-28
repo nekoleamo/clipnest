@@ -15,7 +15,7 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<div class="page" id="top">
+<div class="page">
 
   <!-- ============ 顶栏：粘顶药丸 ============ -->
   <div class="nav-wrap">
@@ -492,11 +492,11 @@ mygo 自绘 · 无 WebView
     </div>
   </footer>
 
-  <a class="to-top" href="#top" aria-label="回到顶部">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <path d="M12 19V6M6 12l6-6 6 6"/>
-    </svg>
-  </a>
+  <!-- ============ 回到顶部 ============ -->
+  <button class="to-top" type="button" aria-label="回到页面顶部">
+    <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M8 13V3.6M3.4 8.2 8 3.6l4.6 4.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span>顶部</span>
+  </button>
 
 </div>
 <script>
@@ -511,18 +511,26 @@ document.querySelectorAll('[data-copy]').forEach(function (el) {
     });
   });
 });
-// 回到顶部：滚过一屏才出现（脚本只负责显隐，平滑滚动交给 CSS）
+// 回到顶部：滚过首屏九成才出现；不打扰 prefers-reduced-motion 的人
 (function () {
-  var el = document.querySelector('.to-top');
-  if (!el) return;
-  var shown = false;
-  function upd() {
-    var want = window.scrollY > 600;
-    if (want !== shown) { shown = want; el.classList.toggle('on', want); }
+  var btn = document.querySelector('.to-top');
+  if (!btn) return;
+  var reduce = matchMedia('(prefers-reduced-motion: reduce)');
+  var ticking = false;
+  function sync() {
+    ticking = false;
+    btn.classList.toggle('is-on', window.scrollY > window.innerHeight * 0.9);
   }
-  addEventListener('scroll', upd, { passive: true });
-  addEventListener('resize', upd);
-  upd();
+  addEventListener('scroll', function () {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(sync);
+  }, { passive: true });
+  addEventListener('resize', sync);
+  btn.addEventListener('click', function () {
+    window.scrollTo({ top: 0, behavior: reduce.matches ? 'auto' : 'smooth' });
+  });
+  sync();
 })();
 // 明暗切换：写 data-theme 并记住；没锁定时跟随系统
 (function () {
